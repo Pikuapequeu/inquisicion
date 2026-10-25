@@ -1,0 +1,32 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Cambia este correo por el tuyo (el mismo que pongas en firebase-config.js)
+    function dueno() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email.lower() == 'tu-correo@gmail.com';
+    }
+
+    function miembro() {
+      return dueno() || (
+        request.auth != null
+        && request.auth.token.email_verified == true
+        && exists(/databases/$(database)/documents/config/acceso)
+        && request.auth.token.email.lower() in get(/databases/$(database)/documents/config/acceso).data.editores
+      );
+    }
+
+    // Lista de acceso: la leen los miembros, solo el dueño la cambia
+    match /config/{doc} {
+      allow read: if miembro();
+      allow write: if dueno();
+    }
+
+    // Todo lo demás: solo miembros de la lista
+    match /{coleccion}/{id} {
+      allow read, write: if coleccion != 'config' && miembro();
+    }
+  }
+}

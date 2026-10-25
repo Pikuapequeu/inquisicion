@@ -1,0 +1,1084 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Archivo de la Inquisición</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Grenze+Gotisch:wght@500;700&family=Alegreya:ital,wght@0,400;0,600;1,400&family=Alegreya+Sans:wght@400;500;700&display=swap">
+<style>
+/* Layout: a chancery ledger — sealed header band, tab rail, then one working sheet per office of the Order. Dark vellum first; daylight parchment as the alternate. */
+:root {
+  --bg: #121014; --panel: #1b171c; --panel-2: #241e25; --line: #3a2f38; --line-soft: #2a232a;
+  --ink: #ebe2d6; --muted: #a3978f; --blood: #c03a48; --blood-ink: #ffd9dc; --gold: #c9a45c; --gold-soft: rgba(201,164,92,.16);
+  --ok: #7fae78; --warn: #d9a046; --crit: #e0606a;
+  --f-display: "Grenze Gotisch", "UnifrakturCook", "Times New Roman", serif;
+  --f-body: "Alegreya", Georgia, "Times New Roman", serif;
+  --f-ui: "Alegreya Sans", "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --bg: #ebe5dc; --panel: #f7f3ed; --panel-2: #e3dbd0; --line: #c9bcae; --line-soft: #dbd1c5;
+  --ink: #241b1f; --muted: #6b5e57; --blood: #9b1f2c; --blood-ink: #fff3f3; --gold: #86651f; --gold-soft: rgba(134,101,31,.13);
+  --ok: #3d7638; --warn: #95600f; --crit: #a8222f; color-scheme: light } }
+:root[data-theme="light"] {
+  --bg: #ebe5dc; --panel: #f7f3ed; --panel-2: #e3dbd0; --line: #c9bcae; --line-soft: #dbd1c5;
+  --ink: #241b1f; --muted: #6b5e57; --blood: #9b1f2c; --blood-ink: #fff3f3; --gold: #86651f; --gold-soft: rgba(134,101,31,.13);
+  --ok: #3d7638; --warn: #95600f; --crit: #a8222f; color-scheme: light }
+
+* { box-sizing: border-box }
+[hidden] { display: none !important }
+img { max-width: 100% }
+:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px) }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 16px; line-height: 1.5 }
+.wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)) }
+
+/* header */
+.band { background: var(--panel); border-bottom: 1px solid var(--line) }
+.band .wrap { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; padding-block: 18px 14px }
+.crest { display: flex; gap: 14px; align-items: center; min-width: 0; flex: 1 1 420px }
+.crest svg { flex: none; width: 52px; height: 52px }
+.crest h1 { font-family: var(--f-display); font-weight: 700; font-size: clamp(28px, 4vw, 40px); line-height: 1; margin: 0; letter-spacing: .01em; text-wrap: balance }
+.crest p { margin: 4px 0 0; font-family: var(--f-ui); color: var(--muted); font-size: 13px; letter-spacing: .06em; text-transform: uppercase }
+.now { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; font-family: var(--f-ui); font-size: 13px; color: var(--muted); margin-left: auto }
+.now .date b { color: var(--ink); font-weight: 500 }
+.peers { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end }
+.peer { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px 2px 2px; border-radius: 999px; background: var(--panel-2); color: var(--ink); font-size: 12px }
+.peer img { width: 20px; height: 20px; border-radius: 50% }
+.peer i { font-style: normal; color: var(--muted) }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px }
+.dot.on { background: var(--ok) }
+
+nav.tabs { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line) }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg) }
+nav.tabs .wrap { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none }
+nav.tabs button { font-family: var(--f-ui); font-size: 15px; font-weight: 500; color: var(--muted); background: none; border: 0; padding: 12px 14px 10px; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap }
+nav.tabs button:hover { color: var(--ink) }
+nav.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--blood) }
+nav.tabs button:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px }
+
+main { padding-block: 24px 64px }
+.notice { font-family: var(--f-ui); font-size: 14px; padding: 10px 14px; border: 1px solid var(--line); border-left: 3px solid var(--warn); background: var(--panel); margin-bottom: 18px }
+.notice[hidden] { display: none }
+
+h2 { font-family: var(--f-display); font-weight: 700; font-size: 30px; line-height: 1.1; margin: 0; text-wrap: balance }
+h3 { font-family: var(--f-ui); font-size: 13px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px }
+.head { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: end; justify-content: space-between; margin-bottom: 18px }
+.head p { margin: 4px 0 0; color: var(--muted); max-width: 70ch }
+.sheet { display: grid; gap: 22px }
+.cols { display: grid; gap: 22px; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) }
+.cols2 { display: grid; gap: 22px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) }
+@media (max-width: 900px) { .cols, .cols2 { grid-template-columns: minmax(0, 1fr) } }
+.panel { background: var(--panel); border: 1px solid var(--line-soft); padding: 18px; min-width: 0 }
+
+/* stat row */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1px; background: var(--line-soft); border: 1px solid var(--line-soft) }
+.stat { background: var(--panel); padding: 14px 16px; min-width: 0 }
+.stat .k { font-family: var(--f-ui); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted) }
+.stat .v { font-family: var(--f-ui); font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.15; margin-top: 4px }
+.stat .s { font-family: var(--f-ui); font-size: 13px; color: var(--muted) }
+
+/* year chips */
+.years { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; font-family: var(--f-ui); font-size: 13px }
+.years span { color: var(--muted); margin-right: 4px }
+.chip { font-family: var(--f-ui); font-size: 13px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); padding: 3px 10px; border-radius: 999px; cursor: pointer; font-variant-numeric: tabular-nums }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink) }
+.chip:hover { border-color: var(--gold) }
+
+/* buttons */
+.btn { font-family: var(--f-ui); font-size: 14px; font-weight: 500; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink); padding: 7px 14px; cursor: pointer; border-radius: 3px }
+.btn:hover { border-color: var(--gold) }
+.btn.seal { background: var(--blood); color: var(--blood-ink); border-color: var(--blood) }
+.btn.seal:hover { filter: brightness(1.1) }
+.btn.ghost { background: none }
+.btn[disabled] { opacity: .5; cursor: not-allowed }
+.x { font-family: var(--f-ui); font-size: 12px; background: none; border: 1px solid transparent; color: var(--muted); cursor: pointer; padding: 2px 6px; border-radius: 3px; white-space: nowrap }
+.x:hover { color: var(--crit); border-color: var(--line) }
+.x.armed { color: var(--blood-ink); background: var(--crit) }
+
+/* tables */
+.tbl { overflow-x: auto; border: 1px solid var(--line-soft); background: var(--panel) }
+table { border-collapse: collapse; width: 100%; font-family: var(--f-ui); font-size: 14px; font-variant-numeric: tabular-nums }
+th { text-align: left; font-weight: 500; font-size: 12px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); padding: 10px 10px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; vertical-align: bottom }
+td { padding: 6px 10px; border-bottom: 1px solid var(--line-soft); vertical-align: middle }
+tr:last-child td { border-bottom: 0 }
+td.r, th.r { text-align: right }
+td.calc { font-weight: 700; text-align: right }
+td.sub { color: var(--muted); font-size: 13px }
+tfoot td { border-top: 1px solid var(--line); font-weight: 700; background: var(--panel-2) }
+.name { font-weight: 500; white-space: nowrap }
+.name small { display: block; font-weight: 400; color: var(--muted); font-size: 12px }
+
+input, select, textarea { font: inherit; color: var(--ink) }
+input.num, input.txt, select.inl { background: transparent; border: 0; border-bottom: 1px dashed var(--line); padding: 3px 2px; border-radius: 0 }
+input.num { width: 9ch; text-align: right; font-variant-numeric: tabular-nums }
+input.num.w { width: 12ch }
+input.txt { width: 100%; min-width: 14ch }
+select.inl { padding-right: 0; max-width: 22ch; background: var(--panel) }
+input.num:hover, input.txt:hover, select.inl:hover { border-bottom-color: var(--gold) }
+input.num:focus, input.txt:focus { border-bottom: 1px solid var(--gold); background: var(--gold-soft); outline: none }
+input:disabled, select:disabled { border-bottom-color: transparent; opacity: 1; color: var(--ink) }
+
+/* forms */
+form.add { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; padding: 14px; background: var(--panel-2); border: 1px solid var(--line-soft) }
+form.add label { display: flex; flex-direction: column; gap: 3px; font-family: var(--f-ui); font-size: 12px; color: var(--muted); letter-spacing: .03em; min-width: 0 }
+form.add input, form.add select, form.add textarea { background: var(--panel); border: 1px solid var(--line); padding: 6px 8px; border-radius: 3px; font-family: var(--f-ui); font-size: 14px; min-width: 0 }
+form.add input[type="number"] { width: 10ch }
+form.add .grow { flex: 1 1 260px }
+form.add .grow input, form.add .grow textarea { width: 100% }
+details.adder > summary { cursor: pointer; font-family: var(--f-ui); font-size: 14px; color: var(--gold); padding: 6px 0; list-style: none }
+details.adder > summary::before { content: "+ " }
+details.adder[open] > summary::before { content: "− " }
+
+/* bars */
+.hbar { display: grid; grid-template-columns: minmax(90px, 160px) minmax(0, 1fr) auto; gap: 6px 12px; align-items: center; font-family: var(--f-ui); font-size: 14px }
+.hbar .lab { white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.hbar .lab small { color: var(--muted) }
+.track { height: 10px; background: var(--line-soft); border-radius: 0 4px 4px 0; position: relative; min-width: 0 }
+.fill { position: absolute; inset: 0 auto 0 0; background: var(--gold); border-radius: 0 4px 4px 0 }
+.fill.hot { background: var(--warn) }
+.fill.cons { background: var(--blood) }
+.hbar .val { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap }
+.flag { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--warn) }
+
+.vchart { display: flex; align-items: flex-end; gap: 4px; height: 150px; padding-top: 22px; border-bottom: 1px solid var(--line); position: relative }
+.vchart .col { flex: 1 1 0; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; position: relative; cursor: default }
+.vchart .bar { width: 100%; max-width: 38px; background: var(--gold); border-radius: 4px 4px 0 0; min-height: 2px }
+.vchart .col:hover .bar, .vchart .col:focus .bar { background: var(--ink) }
+.vchart .col .tip { position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); font-family: var(--f-ui); font-size: 12px; padding: 3px 7px; white-space: nowrap; border-radius: 3px; pointer-events: none; opacity: 0; z-index: 2 }
+.vchart .col:hover .tip, .vchart .col:focus .tip { opacity: 1 }
+.vchart .col .lbl { position: absolute; bottom: calc(100% + 4px); font-family: var(--f-ui); font-size: 11px; color: var(--muted); white-space: nowrap }
+.vchart .col:hover .lbl { opacity: 0 }
+.xaxis { display: flex; gap: 4px; font-family: var(--f-ui); font-size: 11px; color: var(--muted); margin-top: 4px }
+.xaxis span { flex: 1 1 0; text-align: center; min-width: 0 }
+
+/* feed */
+.feed { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; font-family: var(--f-ui); font-size: 14px }
+.feed li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 8px; align-items: start }
+.feed img { width: 22px; height: 22px; border-radius: 50% }
+.feed .when { color: var(--muted); font-size: 12px }
+.feed .who { font-weight: 700 }
+.empty { font-family: var(--f-ui); color: var(--muted); font-size: 14px; padding: 8px 0 }
+
+/* objectives */
+.goals { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line-soft); background: var(--panel) }
+.goals li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line-soft) }
+.goals li:last-child { border-bottom: 0 }
+.goals input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--blood) }
+.goals .done .t { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--blood) }
+.tag { font-family: var(--f-ui); font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap }
+.progress { height: 6px; background: var(--line-soft); margin-top: 8px; position: relative; max-width: 360px }
+.progress i { position: absolute; inset: 0 auto 0 0; background: var(--blood) }
+
+/* chronicle */
+.filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center }
+.year-block { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 18px; border-top: 1px solid var(--line); padding-top: 14px }
+.year-block > .yr { font-family: var(--f-display); font-size: 26px; line-height: 1; color: var(--gold) }
+.year-block > .yr small { display: block; font-family: var(--f-ui); font-size: 11px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; margin-top: 4px }
+.events { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px }
+.ev { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; gap: 12px; align-items: baseline }
+.ev .when { font-family: var(--f-ui); font-size: 13px; color: var(--muted) }
+.ev .what b { font-family: var(--f-ui); font-weight: 700; font-size: 13px; margin-right: 6px }
+.ev .tools { display: flex; gap: 2px }
+@media (max-width: 640px) {
+  .year-block { grid-template-columns: minmax(0, 1fr); gap: 8px }
+  .ev { grid-template-columns: minmax(0, 1fr) auto }
+  .ev .when { grid-column: 1 / -1 }
+  .now { align-items: flex-start; margin-left: 0 }
+  .peers { justify-content: flex-start }
+}
+
+.toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--bg); font-family: var(--f-ui); font-size: 14px; padding: 9px 16px; border-radius: 4px; z-index: 20; max-width: calc(100% - 32px) }
+.muted { color: var(--muted) }
+.ui { font-family: var(--f-ui) }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-family: var(--f-ui); font-size: 12px; color: var(--muted); margin-top: 10px }
+.legend i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: -1px }
+@media (prefers-reduced-motion: no-preference) { .fill, .vchart .bar, .progress i { transition: width .4s ease, height .4s ease } }
+.who-am-i { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap }
+.gate { max-width: 520px; margin: 40px auto; text-align: center; display: grid; gap: 14px; justify-items: center }
+.gate p { color: var(--muted); margin: 0 }
+textarea.emails { width: 100%; min-height: 110px; background: var(--panel); border: 1px solid var(--line); padding: 8px; font-family: var(--f-ui); font-size: 14px; border-radius: 3px }
+</style>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+</head>
+<body>
+
+<header class="band">
+  <div class="wrap">
+    <div class="crest">
+      <svg viewBox="0 0 64 64" aria-hidden="true">
+        <circle cx="32" cy="32" r="30" fill="none" stroke="var(--gold)" stroke-width="1.5"/>
+        <circle cx="32" cy="32" r="25" fill="none" stroke="var(--gold)" stroke-width=".75" stroke-dasharray="2 3"/>
+        <g stroke="var(--gold)" stroke-width="2" stroke-linecap="round">
+          <line x1="32" y1="11" x2="32" y2="17"/><line x1="17" y1="17" x2="21" y2="21"/><line x1="47" y1="17" x2="43" y2="21"/>
+          <line x1="11" y1="32" x2="17" y2="32"/><line x1="53" y1="32" x2="47" y2="32"/>
+        </g>
+        <path d="M18 38 A14 14 0 0 1 46 38 Z" fill="var(--gold)"/>
+        <path d="M32 24 L34 40 L32 54 L30 40 Z" fill="var(--blood)"/>
+        <rect x="26" y="38" width="12" height="2.5" fill="var(--blood)"/>
+      </svg>
+      <div>
+        <h1>Archivo de la Inquisición</h1>
+        <p>Ordo Sanctae Inquisitionis · Dominio de Barovia</p>
+      </div>
+    </div>
+    <div class="now">
+      <div class="date" id="fecha"><span class="dot" id="conn"></span>Conectando con el archivo…</div>
+      <div class="peers" id="peers"></div>
+      <div class="who-am-i" id="whoami"></div>
+    </div>
+  </div>
+</header>
+<nav class="tabs" aria-label="Secciones">
+  <div class="wrap" role="tablist" id="tabs"></div>
+</nav>
+<main class="wrap">
+  <div class="notice" id="notice" hidden></div>
+  <div id="view"></div>
+</main>
+
+<script>
+/* ---------- rules of the domain (from the "Constantes" sheet) ---------- */
+const MESES = ['Mazho','Alturiak','Khes','Tarsakh','Mirtul','Kyzhorn','Flamarul','Eleasias','Eleint','Marpenot','Uktar','Noctal'];
+const PERSONAJES = ['Inquisición','Lander','Marlok','Naivara','Theren','Acechador','Aelar'];
+const METALES = { Platino: 10, Oro: 1, Electro: 0.5, Plata: 0.1, Cobre: 0.01 };
+const TIERRAS = ['No plantado','Normal','Fértil','Normal + Crecimiento vegetal','Fértil + Crecimiento vegetal'];
+const CULTIVOS = {
+  trigo:     { n: 'Trigo',     normal: 384000,  fertil: 960000 },
+  legumbres: { n: 'Legumbres', normal: 307200,  fertil: 576000 },
+  frutales:  { n: 'Frutales',  normal: 3200000, fertil: 5760000 },
+  uva:       { n: 'Vid',       normal: 5120000, fertil: 10240000 },
+};
+// lb of game per mile hunted: Σ(pieces/mile × lb/piece) for turkey, goat, deer, fox, boar, wolf, bear
+const CAZA_LB_MILLA = 2.56*20 + 3.84*150 + 3.84*150 + 6.4*10 + 6.4*150 + 1.28*100 + 1.28*300;
+const CAZA_PIEZAS_MILLA = 2.56 + 3.84 + 3.84 + 6.4 + 6.4 + 1.28 + 1.28;
+const PESCA_LB_MILLA = 4350;
+const MINERALES = [
+  { k: 'diamantes',  n: 'Diamantes',  rareza: 'Muy abundante', base: 5000 },
+  { k: 'rubies',     n: 'Rubíes',     rareza: 'Abundante',     base: 2000 },
+  { k: 'zafiros',    n: 'Zafiros',    rareza: 'Abundante',     base: 2000 },
+  { k: 'carbon',     n: 'Carbón',     rareza: 'Normal',        base: 1000 },
+  { k: 'oro',        n: 'Oro',        rareza: 'Normal',        base: 1000 },
+  { k: 'plata',      n: 'Plata',      rareza: 'Normal',        base: 1000 },
+  { k: 'platino',    n: 'Platino',    rareza: 'Normal',        base: 1000 },
+  { k: 'adamantina', n: 'Adamantina', rareza: 'Normal',        base: 1000 },
+  { k: 'mithral',    n: 'Mithral',    rareza: 'Raro',          base: 200 },
+];
+const EFICACIA = { goblins: 0.04, humanos: 0.1, enanos: 0.2 };
+const TABS = [
+  ['resumen','Resumen'],['poblacion','Población'],['ganado','Ganado'],['tierras','Tierras'],
+  ['mina','Mina'],['tesoro','Tesoro'],['cronica','Crónica'],['objetivos','Objetivos'],
+];
+
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const fmt = (v, d = 2) => (v == null || isNaN(v)) ? '—' : new Intl.NumberFormat('es-ES', { maximumFractionDigits: d, useGrouping: 'always' }).format(v);
+const big = v => Math.abs(v) >= 1e6 ? fmt(v / 1e6, 2) + ' M' : fmt(v, 0);
+const num = s => { if (s == null || String(s).trim() === '') return null; const v = Number(String(s).trim().replace(',', '.')); return isNaN(v) ? null : v; };
+const slug = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'x';
+const store = { get(k, d) { try { const v = localStorage.getItem('inq.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+                set(k, v) { try { localStorage.setItem('inq.' + k, JSON.stringify(v)); } catch {} } };
+let toastTimer;
+function toast(msg) {
+  let t = $('.toast'); if (!t) { t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status'); document.body.append(t); }
+  t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 3200);
+}
+function errMsg(e) {
+  const c = e && e.code;
+  if (c === 'permission-denied') return 'Tu cuenta no tiene permiso para cambiar el archivo. Pide al dueño que te añada a la lista.';
+  if (c === 'resource-exhausted') return 'Se ha llegado al límite gratuito de Firebase por hoy, o hay demasiados cambios seguidos. Espera un poco.';
+  if (c === 'unauthenticated') return 'Tu sesión ha caducado. Vuelve a entrar con Google.';
+  return 'No se pudo guardar. Revisa la conexión e inténtalo de nuevo.';
+}
+const mesTxt = (a, m) => `${MESES[(m - 1 + 12) % 12] || '¿?'}`;
+function rango(e) {
+  if (e.anio === e.anioFin && e.mes === e.mesFin) return mesTxt(e.anio, e.mes);
+  if (e.anio === e.anioFin) return `${mesTxt(e.anio, e.mes)} – ${mesTxt(e.anio, e.mesFin)}`;
+  return `${mesTxt(e.anio, e.mes)} – ${mesTxt(e.anioFin, e.mesFin)}, año ${e.anioFin}`;
+}
+function hace(ts) {
+  const s = Math.round((Date.now() - ts) / 1000);
+  if (s < 60) return 'ahora mismo'; if (s < 3600) return `hace ${Math.round(s / 60)} min`;
+  if (s < 86400) return `hace ${Math.round(s / 3600)} h`;
+  return new Date(ts).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+}
+
+/* ---------- state ---------- */
+const S = { poblacion: {}, ganado: {}, tierras: {}, mina: {}, monedas: [], gemas: [], objetos: [], cronica: [], objetivos: [], registro: [], ready: {} };
+const V = { tab: 'resumen', year: {}, filtro: store.get('filtro', []), editEv: null };
+let db = null, user = null, room = null, myId = null, canWrite = true, connected = false;
+let auth = null, me = null, authReady = false, esDueno = false, miembro = null, acceso = null;
+const CFG = window.FIREBASE_CONFIG || null;
+const DUENO = String(window.DUENO || '').trim().toLowerCase();
+const NAMES = {};
+const years = c => Object.keys(S[c]).map(Number).sort((a, b) => a - b);
+const latest = c => { const y = years(c); return y.length ? y[y.length - 1] : null; };
+const selYear = c => (V.year[c] != null && S[c][V.year[c]]) ? V.year[c] : latest(c);
+const filas = d => Object.entries(d?.filas || {}).filter(([, f]) => f).sort((a, b) => (a[1].orden || 0) - (b[1].orden || 0));
+const atOrBefore = (c, y) => { const ys = years(c).filter(v => v <= y); return ys.length ? S[c][ys[ys.length - 1]] : null; };
+
+/* ---------- calculations ---------- */
+function calcPob(f) {
+  const crec = (f.poblacion || 0) * (f.indCrec || 0);
+  let fin = Math.floor((f.poblacion || 0) + crec + (f.desplazamientos || 0) - (f.bajas || 0));
+  if (f.maximo > 0) fin = Math.min(fin, f.maximo);
+  fin = Math.max(0, fin);
+  return { crec, fin, ejercito: fin * (f.indEjercito || 0), diario: fin * (f.lbDiarias || 0) };
+}
+function totPob(d) {
+  const t = { fin: 0, ejercito: 0, diario: 0, inicio: 0 };
+  for (const [, f] of filas(d)) { const c = calcPob(f); t.fin += c.fin; t.ejercito += c.ejercito; t.diario += c.diario; t.inicio += f.poblacion || 0; }
+  t.anual = t.diario * 365; return t;
+}
+function cultivo(k, millas, tierra) {
+  const c = CULTIVOS[k]; if (!millas || !tierra || tierra === 'No plantado') return 0;
+  return millas * (tierra.startsWith('Fértil') ? c.fertil : c.normal) * (tierra.includes('Crecimiento') ? 2 : 1);
+}
+function calcTierra(f) {
+  const r = { caza: (f.caza || 0) * CAZA_LB_MILLA, pesca: (f.pesca || 0) * PESCA_LB_MILLA, cultivos: 0 };
+  for (const k in CULTIVOS) { r[k] = cultivo(k, f[k], f[k + 'Tierra']); r.cultivos += r[k]; }
+  r.total = r.caza + r.pesca + r.cultivos; return r;
+}
+function totTierras(d) {
+  const t = { caza: 0, pesca: 0, cultivos: 0, total: 0 };
+  for (const [, f] of filas(d)) { const c = calcTierra(f); for (const k in t) t[k] += c[k]; }
+  return t;
+}
+function totGanado(d) {
+  const t = { animales: 0, consumo: 0, carne: 0, leche: 0, huevos: 0, lana: 0 };
+  for (const [, f] of filas(d)) { t.animales += f.animales || 0; t.consumo += (f.animales || 0) * (f.consumoPorAnimal || 0);
+    t.carne += f.carne || 0; t.leche += f.leche || 0; t.huevos += f.huevos || 0; t.lana += f.lana || 0; }
+  t.comida = t.carne + t.leche + t.huevos; return t;
+}
+function calcMina(d) {
+  const w = d.trabajadores || {}; const g = w.goblins || 0, h = w.humanos || 0, e = w.enanos || 0, total = g + h + e;
+  const base = g * EFICACIA.goblins + h * EFICACIA.humanos + e * EFICACIA.enanos;
+  const pasos = [['Eficacia por raza', base]];
+  let f = base * 1.05; pasos.push(['Abundancia de la mina (+5 %)', f]);
+  if (d.pocosTrabajadores) { f *= 0.5; pasos.push(['Menos del 10 % de trabajadores (−50 %)', f]); }
+  if (total > 0 && e === total) { f *= 1.1; pasos.push(['Todos son enanos (+10 %)', f]); }
+  if (g > e + h) { f *= 0.95; pasos.push(['Más goblins que enanos y humanos (−5 %)', f]); }
+  const factor = f / 100; const min = {}; let valor = 0, prodTot = 0;
+  for (const m of MINERALES) {
+    const ini = d.inicial?.[m.k] || 0, prod = m.base * factor, add = d.anadir?.[m.k] || 0, gas = d.gastos?.[m.k] || 0;
+    const fin = ini + prod + add - gas; min[m.k] = { ini, prod, add, gas, fin }; valor += fin; prodTot += prod;
+  }
+  return { total, base, pasos, factor, min, valor, prodTot };
+}
+function balances() {
+  const b = {};
+  for (const m of S.monedas) {
+    const key = m.metal + '|' + m.ubicacion; b[key] = b[key] || { metal: m.metal, ubicacion: m.ubicacion, cant: 0 };
+    b[key].cant += (m.tipo === 'salida' ? -1 : 1) * (m.cantidad || 0);
+  }
+  const rows = Object.values(b).filter(r => r.cant !== 0).sort((a, z) => (METALES[z.metal] || 0) - (METALES[a.metal] || 0) || a.ubicacion.localeCompare(z.ubicacion));
+  rows.forEach(r => r.po = r.cant * (METALES[r.metal] || 0));
+  return rows;
+}
+function totTesoro() {
+  const monedas = balances().reduce((s, r) => s + r.po, 0);
+  const gemas = S.gemas.reduce((s, g) => s + (g.valor || 0) * (g.cantidad || 0), 0);
+  const objetos = S.objetos.reduce((s, o) => s + (o.valor || 0) * (o.cantidad || 0), 0);
+  return { monedas, gemas, objetos, total: monedas + gemas + objetos };
+}
+
+/* ---------- writes ---------- */
+const queues = {};
+function write(path, fn) {
+  const p = (queues[path] || Promise.resolve()).then(fn);
+  queues[path] = p.catch(() => {});
+  return p.catch(e => { toast(errMsg(e)); if (e && e.code === 'permission-denied') { canWrite = false; schedule(); } throw e; });
+}
+// set+merge deep-merges nested maps (Firestore's update() would replace the whole `filas` map)
+const upd = (path, data) => write(path, () => db.doc(path).set(data, { merge: true }));
+const setDoc = (path, data) => write(path, () => db.doc(path).set(data));
+const delDoc = path => write(path, () => db.doc(path).delete());
+function log(texto) {
+  if (!db) return;
+  db.collection('registro').add({ ts: Date.now(), by: myId, texto: String(texto).slice(0, 300) }).catch(() => {});
+}
+function guard() { if (!db) { toast('Sin conexión con el archivo compartido.'); return false; } if (!canWrite) { toast('Solo lectura: no puedes cambiar el archivo.'); return false; } return true; }
+
+/* ---------- render scheduling with focus preservation ---------- */
+let pending = false;
+function schedule() { if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; render(); }); } }
+function render() {
+  const a = document.activeElement; let keep = null;
+  if (a && a.id && $('#view').contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) {
+    keep = { id: a.id, value: a.value, s: a.selectionStart, e: a.selectionEnd, dirty: a.dataset.dirty === '1' };
+  }
+  const openDetails = [...document.querySelectorAll('#view details[id]')].filter(d => d.open).map(d => d.id);
+  renderHeader();
+  $('#view').innerHTML = gateView() || (VIEWS[V.tab] || VIEWS.resumen)();
+  openDetails.forEach(id => { const d = document.getElementById(id); if (d) d.open = true; });
+  if (keep) {
+    const el = document.getElementById(keep.id);
+    if (el) { if (keep.dirty) { el.value = keep.value; el.dataset.dirty = '1'; } el.focus({ preventScroll: true });
+      try { if (keep.s != null) el.setSelectionRange(keep.s, keep.e); } catch {} }
+  }
+  if (!canWrite || !db) document.querySelectorAll('#view [data-bind], #view form.add [type=submit], #view [data-needs-write]').forEach(el => el.disabled = true);
+  resolveNames();
+}
+document.addEventListener('input', e => { if (e.target.dataset && e.target.dataset.bind) e.target.dataset.dirty = '1'; });
+
+function renderHeader() {
+  $('#tabs').innerHTML = TABS.map(([k, n]) => `<button role="tab" data-tab="${k}" aria-selected="${V.tab === k}">${n}</button>`).join('');
+  const ev = S.cronica.reduce((m, e) => (!m || e.anio * 12 + e.mes > m.anio * 12 + m.mes) ? e : m, null);
+  $('#fecha').innerHTML = `<span class="dot ${connected ? 'on' : ''}" title="${connected ? 'En vivo' : 'Sin conexión en vivo'}"></span>` +
+    (ev ? `Crónica al día: <b>año ${ev.anio}, ${esc(MESES[ev.mes - 1])}</b>` : (db ? 'Archivo conectado' : 'Conectando con el archivo…'));
+  $('#whoami').innerHTML = me ? `<span>${esc(me.displayName || me.email)}</span><button class="x" data-act="salir">Salir</button>` : '';
+}
+function gateView() {
+  if (!CFG || !CFG.apiKey || /PEGA/.test(CFG.apiKey)) return `<div class="gate"><h2>Falta la configuración</h2><p>Rellena el archivo <code>firebase-config.js</code> con los datos de tu proyecto de Firebase.</p></div>`;
+  if (!authReady) return `<div class="gate"><p>Abriendo el archivo…</p></div>`;
+  if (!me) return `<div class="gate"><h2>Archivo de la Orden</h2><p>Entra con tu cuenta de Google para consultar y editar el archivo.</p><button class="btn seal" data-act="entrar">Entrar con Google</button></div>`;
+  if (miembro === null) return `<div class="gate"><p>Comprobando tu acceso…</p></div>`;
+  if (!miembro) return `<div class="gate"><h2>Sin acceso</h2><p>La cuenta <b>${esc(me.email)}</b> no está en la lista de la Orden. Pide al dueño del archivo que la añada y vuelve a cargar la página.</p><button class="btn" data-act="salir">Entrar con otra cuenta</button></div>`;
+  return '';
+}
+function duenoPanel() {
+  if (!esDueno) return '';
+  const vacio = S.ready.poblacion && !years('poblacion').length;
+  return `<section class="panel"><h3>Acceso (solo lo ves tú)</h3>
+    <form data-form="acceso" class="sheet" style="gap:8px"><label class="ui muted" style="font-size:13px" for="emails">Correos de Google que pueden entrar y editar, uno por línea</label>
+      <textarea class="emails" id="emails" name="emails">${esc((acceso?.editores || []).join('\n'))}</textarea>
+      <button class="btn" type="submit">Guardar lista</button></form>
+    ${vacio ? `<div style="margin-top:14px"><p class="ui" style="margin:0 0 8px">El archivo está vacío.</p><button class="btn seal" data-act="importar">Importar datos del Excel</button></div>` : ''}
+  </section>`;
+}
+
+/* ---------- small view builders ---------- */
+const dis = () => (!canWrite || !db) ? 'disabled' : '';
+function numIn(kind, a, b, v, extra = '') {
+  return `<input class="num ${extra}" inputmode="decimal" id="i-${kind}-${esc(a)}-${esc(b)}" data-bind="${kind}" data-a="${esc(a)}" data-b="${esc(b)}" value="${v == null ? '' : esc(Math.round(v * 1e6) / 1e6)}" aria-label="${esc(b)}" ${dis()}>`;
+}
+function txtIn(kind, a, b, v, label) {
+  return `<input class="txt" id="i-${kind}-${esc(a)}-${esc(b)}" data-bind="${kind}" data-a="${esc(a)}" data-b="${esc(b)}" value="${esc(v)}" aria-label="${esc(label || b)}" ${dis()}>`;
+}
+function selIn(kind, a, b, v, opts) {
+  return `<select class="inl" id="i-${kind}-${esc(a)}-${esc(b)}" data-bind="${kind}" data-a="${esc(a)}" data-b="${esc(b)}" aria-label="${esc(b)}" ${dis()}>` +
+    opts.map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('') + '</select>';
+}
+function yearChips(c, label = 'Año') {
+  const ys = years(c), cur = selYear(c);
+  return `<div class="years"><span>${label}</span>` + ys.map(y => `<button class="chip" data-act="year" data-c="${c}" data-y="${y}" aria-pressed="${y === cur}">${y}</button>`).join('') + '</div>';
+}
+function delBtn(act, id, label = 'Borrar') { return `<button class="x" data-act="${act}" data-id="${esc(id)}" data-needs-write>${label}</button>`; }
+function vchart(points, unit) {
+  if (!points.length) return '<p class="empty">Sin datos todavía.</p>';
+  const max = Math.max(...points.map(p => p.v), 1);
+  const n = points.length;
+  return `<div class="vchart" role="img" aria-label="${esc(points.map(p => p.x + ': ' + fmt(p.v, 0)).join(', '))}">` +
+    points.map((p, i) => `<div class="col" tabindex="0"><span class="tip">${esc(p.x)}: ${esc(p.tip || fmt(p.v, 0) + ' ' + unit)}</span>` +
+      ((i === n - 1 || i === 0) ? `<span class="lbl">${esc(p.short || big(p.v))}</span>` : '') +
+      `<div class="bar" style="height:${Math.max(1, p.v / max * 100)}%"></div></div>`).join('') +
+    `</div><div class="xaxis">${points.map(p => `<span>${esc(p.x)}</span>`).join('')}</div>`;
+}
+function hbars(rows, max) {
+  return `<div class="hbar">` + rows.map(r => `<div class="lab" title="${esc(r.title || r.label)}">${r.label}</div>
+    <div class="track"><div class="fill ${r.cls || ''}" style="width:${max > 0 ? Math.min(100, r.v / max * 100) : 0}%"></div></div>
+    <div class="val">${r.val}</div>`).join('') + '</div>';
+}
+function advanceBlock(c, label) {
+  const y = latest(c);
+  if (y == null) return '';
+  const sel = selYear(c);
+  if (sel !== y) return `<p class="muted ui">Estás viendo el año ${sel}, ya cerrado. Solo el año ${y} se puede editar.</p>`;
+  return `<button class="btn seal" data-act="advance" data-c="${c}" data-needs-write>Cerrar el año ${y} y abrir el ${y + 1}</button>
+    <span class="muted ui" style="font-size:13px"> ${label}</span>`;
+}
+
+/* ---------- views ---------- */
+const VIEWS = {};
+
+VIEWS.resumen = () => {
+  const yp = latest('poblacion'); const pd = S.poblacion[yp]; const tp = pd ? totPob(pd) : null;
+  const tt = totTesoro(); const ym = latest('mina'); const cm = ym != null ? calcMina(S.mina[ym]) : null;
+  const ok = S.objetivos.filter(o => o.conseguido).length;
+  const td = atOrBefore('tierras', yp), gd = atOrBefore('ganado', yp);
+  const tTi = td ? totTierras(td) : { caza: 0, pesca: 0, cultivos: 0, total: 0 }, tGa = gd ? totGanado(gd) : { comida: 0, consumo: 0 };
+  const prod = tTi.total + tGa.comida;
+  const regiones = {}; if (pd) for (const [, f] of filas(pd)) { const c = calcPob(f); const r = regiones[f.region] = regiones[f.region] || { fin: 0, max: 0, ej: 0 }; r.fin += c.fin; r.max += f.maximo || 0; r.ej += c.ejercito; }
+  const regRows = Object.entries(regiones).sort((a, b) => b[1].fin - a[1].fin);
+  const maxReg = Math.max(1, ...regRows.map(([, r]) => r.max || r.fin));
+  const hist = years('poblacion').map(y => ({ x: y, v: totPob(S.poblacion[y]).fin, tip: fmt(totPob(S.poblacion[y]).fin, 0) + ' ciudadanos', short: fmt(totPob(S.poblacion[y]).fin, 0) }));
+  const foodRows = [
+    { label: 'Cultivos', v: tTi.cultivos, val: big(tTi.cultivos) + ' lb' },
+    { label: 'Ganado', v: tGa.comida, val: big(tGa.comida) + ' lb' },
+    { label: 'Caza', v: tTi.caza, val: big(tTi.caza) + ' lb' },
+    { label: 'Pesca', v: tTi.pesca, val: big(tTi.pesca) + ' lb' },
+    { label: '<b>Consumo humano</b>', title: 'Consumo humano', v: tp ? tp.anual : 0, val: big(tp ? tp.anual : 0) + ' lb', cls: 'cons' },
+  ];
+  const ratio = tp && tp.anual ? prod / tp.anual : null;
+  return `
+  <div class="sheet">
+    <div class="head"><div><h2>Estado del dominio</h2><p>Lo esencial de la Orden de un vistazo. Todo se recalcula en cuanto alguien cambia un dato en cualquier pestaña.</p></div></div>
+    <div class="stats">
+      <div class="stat"><div class="k">Ciudadanos · año ${yp ?? '—'}</div><div class="v">${tp ? fmt(tp.fin, 0) : '—'}</div><div class="s">${tp ? (tp.fin >= tp.inicio ? '+' : '') + fmt(tp.fin - tp.inicio, 0) + ' en el año' : 'Sin censo'}</div></div>
+      <div class="stat"><div class="k">Ejército disponible</div><div class="v">${tp ? fmt(tp.ejercito, 0) : '—'}</div><div class="s">según índice por raza</div></div>
+      <div class="stat"><div class="k">Tesoro de la Orden</div><div class="v">${fmt(tt.total, 0)} po</div><div class="s">monedas, gemas y objetos con valor</div></div>
+      <div class="stat"><div class="k">Mina de Hrakhamar · año ${ym ?? '—'}</div><div class="v">${cm ? fmt(cm.valor, 0) : '—'} po</div><div class="s">${cm ? '+' + fmt(cm.prodTot, 0) + ' po este año' : ''}</div></div>
+      <div class="stat"><div class="k">Objetivos cumplidos</div><div class="v">${ok} / ${S.objetivos.length}</div><div class="progress"><i style="width:${S.objetivos.length ? ok / S.objetivos.length * 100 : 0}%"></i></div></div>
+    </div>
+    <div class="cols">
+      <div class="sheet">
+        <section class="panel"><h3>Población por región · año ${yp ?? '—'}</h3>
+          ${regRows.length ? hbars(regRows.map(([n, r]) => ({ label: esc(n), v: r.fin, cls: r.max && r.fin >= r.max * 0.95 ? 'hot' : '',
+            val: `${fmt(r.fin, 0)} <span class="muted">/ ${r.max ? fmt(r.max, 0) : '∞'}</span>${r.max && r.fin >= r.max * 0.95 ? ' <span class="flag">al límite</span>' : ''}` })), maxReg) : '<p class="empty">Aún no hay censo cargado.</p>'}
+          <div class="legend"><span><i style="background:var(--gold)"></i>ciudadanos sobre el máximo de la región</span><span><i style="background:var(--warn)"></i>95 % o más de capacidad</span></div>
+        </section>
+        <section class="panel"><h3>Balance alimentario · año ${yp ?? '—'} (lb al año)</h3>
+          ${hbars(foodRows, Math.max(1, ...foodRows.map(r => r.v)))}
+          <p class="ui" style="margin:12px 0 0">${ratio != null ? `Se produce <b>${fmt(ratio, 1)} veces</b> lo que come la población.` : ''}
+            <span class="muted">El ganado consume además ${big(tGa.consumo)} lb de forraje al año.</span></p>
+        </section>
+        <section class="panel"><h3>Ciudadanos al cierre de cada año</h3>${vchart(hist, 'ciudadanos')}</section>
+      </div>
+      <aside class="sheet">
+        ${duenoPanel()}
+        <section class="panel"><h3>Ahora en el archivo</h3><div id="peers-side">${peersHtml(true)}</div></section>
+        <section class="panel"><h3>Últimos cambios</h3>${feedHtml()}</section>
+      </aside>
+    </div>
+  </div>`;
+};
+
+function feedHtml() {
+  if (!S.registro.length) return '<p class="empty">Cuando alguien cambie algo aparecerá aquí, con su nombre.</p>';
+  return '<ul class="feed">' + S.registro.slice(0, 25).map(r => {
+    const p = NAMES[r.by]; const name = (p && p.name) || 'Alguien';
+    return `<li>${p ? `<img src="${esc(p.avatarUrl)}" alt="">` : '<span></span>'}<div><span class="who">${esc(name)}</span> ${esc(r.texto)}<div class="when">${esc(hace(r.ts))}</div></div></li>`;
+  }).join('') + '</ul>';
+}
+
+VIEWS.poblacion = () => {
+  const y = selYear('poblacion'); const d = S.poblacion[y]; const edit = y === latest('poblacion');
+  if (!d) return emptyView('Población', 'Aún no hay censo. Cuando se carguen los datos del Excel aparecerán aquí.');
+  const t = totPob(d);
+  const k = (key, f, v, w) => edit ? numIn('pob', key, f, v, w) : fmt(v);
+  const rows = filas(d).map(([key, f]) => { const c = calcPob(f); const full = f.maximo > 0 && c.fin >= f.maximo;
+    return `<tr><td class="name">${esc(f.region)}<small>${esc(f.raza)} · ${esc(f.subraza)}</small></td>
+      <td class="r">${k(key, 'poblacion', f.poblacion)}</td><td class="r">${k(key, 'bajas', f.bajas)}</td><td class="r">${k(key, 'desplazamientos', f.desplazamientos)}</td>
+      <td class="r">${k(key, 'indCrec', f.indCrec)}</td><td class="r sub">${(c.crec >= 0 ? '+' : '') + fmt(c.crec, 1)}</td>
+      <td class="r">${k(key, 'maximo', f.maximo)}</td><td class="calc">${fmt(c.fin, 0)}${full ? ' <span class="flag">tope</span>' : ''}</td>
+      <td class="r">${k(key, 'indEjercito', f.indEjercito)}</td><td class="calc">${fmt(c.ejercito, 2)}</td>
+      <td class="r">${k(key, 'lbDiarias', f.lbDiarias)}</td><td class="calc">${fmt(c.diario, 0)}</td>
+      <td>${edit ? delBtn('delrow', 'poblacion|' + key, 'Quitar') : ''}</td></tr>`; }).join('');
+  return `<div class="sheet">
+    <div class="head"><div><h2>Población y ejército</h2><p>Ciudadanos al cierre = población inicial + crecimiento + desplazamientos − bajas, redondeado hacia abajo y limitado al máximo de la región.</p></div>${yearChips('poblacion')}</div>
+    <div class="stats">
+      <div class="stat"><div class="k">Ciudadanos al cierre</div><div class="v">${fmt(t.fin, 0)}</div><div class="s">empezó el año con ${fmt(t.inicio, 0)}</div></div>
+      <div class="stat"><div class="k">Ejército</div><div class="v">${fmt(t.ejercito, 0)}</div></div>
+      <div class="stat"><div class="k">Consumo diario</div><div class="v">${fmt(t.diario, 0)} lb</div></div>
+      <div class="stat"><div class="k">Consumo anual</div><div class="v">${big(t.anual)} lb</div></div>
+    </div>
+    <div class="tbl"><table>
+      <thead><tr><th>Región · pueblo</th><th class="r">Población inicial</th><th class="r">Bajas</th><th class="r">Desplaz.</th><th class="r">Índice crec.</th><th class="r">Crec.</th><th class="r">Máximo</th><th class="r">Ciudadanos</th><th class="r">Índice ejército</th><th class="r">Ejército</th><th class="r">lb/día pers.</th><th class="r">lb/día</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><td>Total</td><td class="r">${fmt(t.inicio, 0)}</td><td colspan="5"></td><td class="r">${fmt(t.fin, 0)}</td><td></td><td class="r">${fmt(t.ejercito, 2)}</td><td></td><td class="r">${fmt(t.diario, 0)}</td><td></td></tr></tfoot>
+    </table></div>
+    ${edit ? `<details class="adder" id="add-pob"><summary>Añadir un pueblo o región</summary>
+      <form class="add" data-form="pob">
+        <label>Región<input name="region" required maxlength="60"></label><label>Raza<input name="raza" required maxlength="40"></label>
+        <label>Subraza<input name="subraza" maxlength="40"></label><label>Población<input name="poblacion" type="number" step="any" value="0"></label>
+        <label>Máximo<input name="maximo" type="number" step="any" value="0"></label><label>Índice crec.<input name="indCrec" type="number" step="any" value="0.125"></label>
+        <label>Índice ejército<input name="indEjercito" type="number" step="any" value="0.75"></label><label>lb/día<input name="lbDiarias" type="number" step="any" value="3"></label>
+        <button class="btn" type="submit">Añadir</button></form></details>` : ''}
+    <div>${advanceBlock('poblacion', 'Los ciudadanos al cierre pasan a ser la población inicial; bajas y desplazamientos vuelven a 0.')}</div>
+  </div>`;
+};
+
+VIEWS.ganado = () => {
+  const y = selYear('ganado'); const d = S.ganado[y]; const edit = y === latest('ganado');
+  if (!d) return emptyView('Ganado', 'Aún no hay ganado registrado.');
+  const t = totGanado(d);
+  const k = (key, f, v, w) => edit ? numIn('gan', key, f, v, w) : fmt(v);
+  const rows = filas(d).map(([key, f]) => `<tr><td class="name">${esc(f.especie)}<small>${esc(f.region)}${f.alimento ? ' · ' + esc(f.alimento) : ''}</small></td>
+    <td class="r">${k(key, 'poblacion', f.poblacion)}</td><td class="r">${k(key, 'anadidas', f.anadidas)}</td><td class="r">${k(key, 'sacrificadas', f.sacrificadas, 'w')}</td>
+    <td class="r">${k(key, 'indCrec', f.indCrec)}</td><td class="r">${k(key, 'animales', f.animales)}</td><td class="r">${k(key, 'maximo', f.maximo)}</td>
+    <td class="r">${k(key, 'consumoPorAnimal', f.consumoPorAnimal)}</td><td class="calc">${big((f.animales || 0) * (f.consumoPorAnimal || 0))}</td>
+    <td class="r">${k(key, 'carne', f.carne, 'w')}</td><td class="r">${k(key, 'leche', f.leche, 'w')}</td><td class="r">${k(key, 'huevos', f.huevos)}</td><td class="r">${k(key, 'lana', f.lana)}</td>
+    <td>${edit ? delBtn('delrow', 'ganado|' + key, 'Quitar') : ''}</td></tr>`).join('');
+  return `<div class="sheet">
+    <div class="head"><div><h2>Ganado</h2><p>Cabezas, forraje y lo que da cada especie al año (en libras). El consumo de forraje se calcula con animales × lb por animal.</p></div>${yearChips('ganado')}</div>
+    <div class="stats">
+      <div class="stat"><div class="k">Animales</div><div class="v">${fmt(t.animales, 0)}</div></div>
+      <div class="stat"><div class="k">Comida producida</div><div class="v">${big(t.comida)} lb</div><div class="s">carne ${big(t.carne)} · leche ${big(t.leche)} · huevos ${big(t.huevos)}</div></div>
+      <div class="stat"><div class="k">Forraje consumido</div><div class="v">${big(t.consumo)} lb</div></div>
+      <div class="stat"><div class="k">Lana</div><div class="v">${fmt(t.lana, 0)} lb</div></div>
+    </div>
+    <div class="tbl"><table>
+      <thead><tr><th>Especie</th><th class="r">Población inicial</th><th class="r">Añadidas</th><th class="r">Sacrificadas</th><th class="r">Índice crec.</th><th class="r">Animales</th><th class="r">Máximo</th><th class="r">lb forraje / animal</th><th class="r">Forraje</th><th class="r">Carne</th><th class="r">Leche</th><th class="r">Huevos</th><th class="r">Lana</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><td>Total</td><td colspan="4"></td><td class="r">${fmt(t.animales, 0)}</td><td colspan="2"></td><td class="r">${big(t.consumo)}</td><td class="r">${big(t.carne)}</td><td class="r">${big(t.leche)}</td><td class="r">${fmt(t.huevos, 0)}</td><td class="r">${fmt(t.lana, 0)}</td><td></td></tr></tfoot>
+    </table></div>
+    ${edit ? `<details class="adder" id="add-gan"><summary>Añadir una especie</summary>
+      <form class="add" data-form="gan">
+        <label>Especie<input name="especie" required maxlength="50"></label><label>Región<input name="region" required maxlength="50" value="Barovia"></label>
+        <label>Alimento<input name="alimento" maxlength="30" value="Pasto"></label><label>Animales<input name="animales" type="number" step="any" value="0"></label>
+        <label>Máximo<input name="maximo" type="number" step="any" value="0"></label><label>lb forraje / animal<input name="consumoPorAnimal" type="number" step="any" value="0"></label>
+        <button class="btn" type="submit">Añadir</button></form></details>` : ''}
+    <div>${advanceBlock('ganado', 'Los animales actuales pasan a ser la población inicial; añadidas y sacrificadas vuelven a 0.')}</div>
+  </div>`;
+};
+
+VIEWS.tierras = () => {
+  const y = selYear('tierras'); const d = S.tierras[y]; const edit = y === latest('tierras');
+  if (!d) return emptyView('Tierras', 'Aún no hay tierras registradas.');
+  const t = totTierras(d);
+  const k = (key, f, v) => edit ? numIn('tie', key, f, v) : fmt(v);
+  const s = (key, f, v) => edit ? selIn('tie', key, f, v || 'No plantado', TIERRAS) : esc(v);
+  const rows = filas(d).map(([key, f]) => { const c = calcTierra(f);
+    const crop = cn => `<td class="r">${k(key, cn, f[cn])}</td><td>${s(key, cn + 'Tierra', f[cn + 'Tierra'])}</td><td class="calc">${c[cn] ? big(c[cn]) : '—'}</td>`;
+    return `<tr><td class="name">${esc(f.region)}</td>
+      <td class="r">${k(key, 'caza', f.caza)}</td><td class="calc">${c.caza ? big(c.caza) : '—'}</td>
+      <td class="r">${k(key, 'pesca', f.pesca)}</td><td class="calc">${c.pesca ? big(c.pesca) : '—'}</td>
+      ${crop('trigo')}${crop('legumbres')}${crop('frutales')}${crop('uva')}
+      <td class="calc">${big(c.total)}</td><td>${edit ? delBtn('delrow', 'tierras|' + key, 'Quitar') : ''}</td></tr>`; }).join('');
+  return `<div class="sheet">
+    <div class="head"><div><h2>Tierras: caza, pesca y cultivos</h2><p>Se mide en millas. Cada milla de caza da ${fmt(CAZA_PIEZAS_MILLA, 1)} piezas (${fmt(CAZA_LB_MILLA, 1)} lb) y cada milla de pesca ${fmt(PESCA_LB_MILLA, 0)} lb. La tierra fértil rinde más y el Crecimiento vegetal duplica la cosecha.</p></div>${yearChips('tierras')}</div>
+    <div class="stats">
+      <div class="stat"><div class="k">Producción total</div><div class="v">${big(t.total)} lb</div></div>
+      <div class="stat"><div class="k">Cultivos</div><div class="v">${big(t.cultivos)} lb</div></div>
+      <div class="stat"><div class="k">Caza</div><div class="v">${big(t.caza)} lb</div></div>
+      <div class="stat"><div class="k">Pesca</div><div class="v">${big(t.pesca)} lb</div></div>
+    </div>
+    <div class="tbl"><table>
+      <thead><tr><th rowspan="2">Región</th><th colspan="2">Caza</th><th colspan="2">Pesca</th><th colspan="3">Trigo</th><th colspan="3">Legumbres</th><th colspan="3">Frutales</th><th colspan="3">Vid</th><th rowspan="2" class="r">Total lb</th><th rowspan="2"></th></tr>
+      <tr><th class="r">Millas</th><th class="r">lb</th><th class="r">Millas</th><th class="r">lb</th>${'<th class="r">Millas</th><th>Tierra</th><th class="r">lb</th>'.repeat(4)}</tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    ${edit ? `<details class="adder" id="add-tie"><summary>Añadir una región</summary>
+      <form class="add" data-form="tie"><label>Región<input name="region" required maxlength="60"></label>
+        <label>Millas de caza<input name="caza" type="number" step="any" value="0"></label><label>Millas de pesca<input name="pesca" type="number" step="any" value="0"></label>
+        <button class="btn" type="submit">Añadir</button></form></details>` : ''}
+    <div>${advanceBlock('tierras', 'Las tierras se copian tal cual al año siguiente.')}</div>
+  </div>`;
+};
+
+VIEWS.mina = () => {
+  const y = selYear('mina'); const d = S.mina[y]; const edit = y === latest('mina');
+  if (!d) return emptyView('Mina de Hrakhamar', 'Aún no hay registros de la mina.');
+  const c = calcMina(d); const w = d.trabajadores || {};
+  const k = (g, f, v) => edit ? numIn('min', g, f, v) : fmt(v);
+  const hist = years('mina').map(yy => { const v = calcMina(S.mina[yy]).valor; return { x: yy, v, tip: fmt(v, 0) + ' po', short: big(v) }; });
+  const rows = MINERALES.map(m => { const r = c.min[m.k];
+    return `<tr><td class="name">${m.n}<small>${m.rareza} · ${fmt(m.base, 0)} base</small></td><td class="r">${fmt(r.ini, 2)}</td>
+      <td class="calc">+${fmt(r.prod, 2)}</td><td class="r">${k('anadir', m.k, r.add)}</td><td class="r">${k('gastos', m.k, r.gas)}</td><td class="calc">${fmt(r.fin, 2)}</td></tr>`; }).join('');
+  return `<div class="sheet">
+    <div class="head"><div><h2>Mina de Hrakhamar</h2><p>Valores en monedas de oro. Cada trabajador rinde según su raza (goblin 0,04 · humano 0,1 · enano 0,2) y se aplican las bonificaciones de la mina.</p></div>${yearChips('mina')}</div>
+    <div class="cols2">
+      <section class="panel"><h3>Cuadrilla · año ${y}</h3>
+        <div class="tbl" style="border:0"><table><tbody>
+          <tr><td class="name">Goblins <small>Batiri</small></td><td class="r">${k('trabajadores', 'goblins', w.goblins)}</td></tr>
+          <tr><td class="name">Enanos <small>Albinos</small></td><td class="r">${k('trabajadores', 'enanos', w.enanos)}</td></tr>
+          <tr><td class="name">Humanos <small>Barovianos</small></td><td class="r">${k('trabajadores', 'humanos', w.humanos)}</td></tr>
+          <tr><td class="name">Menos del 10 % de trabajadores</td><td class="r"><input type="checkbox" id="i-min-poc" data-bind="minpoc" ${d.pocosTrabajadores ? 'checked' : ''} ${edit ? '' : 'disabled'} ${dis()}></td></tr>
+        </tbody><tfoot><tr><td>Total</td><td class="r">${fmt(c.total, 0)}</td></tr></tfoot></table></div>
+      </section>
+      <section class="panel"><h3>Rendimiento</h3>
+        <div class="tbl" style="border:0"><table><tbody>${c.pasos.map(([n, v]) => `<tr><td>${n}</td><td class="r">${fmt(v, 4)}</td></tr>`).join('')}</tbody>
+        <tfoot><tr><td>Factor de extracción</td><td class="r">${fmt(c.factor * 100, 4)} %</td></tr></tfoot></table></div>
+        <p class="ui muted" style="font-size:13px;margin:8px 0 0">Este año se extraen ${fmt(c.prodTot, 0)} po en total.</p>
+      </section>
+    </div>
+    <div class="tbl"><table>
+      <thead><tr><th>Mineral</th><th class="r">Inicio del año</th><th class="r">Extraído</th><th class="r">Añadido</th><th class="r">Gastado</th><th class="r">Fin del año</th></tr></thead>
+      <tbody>${rows}</tbody><tfoot><tr><td>Total (po)</td><td class="r">${fmt(MINERALES.reduce((s, m) => s + c.min[m.k].ini, 0), 2)}</td><td class="r">+${fmt(c.prodTot, 2)}</td><td></td><td></td><td class="r">${fmt(c.valor, 2)}</td></tr></tfoot>
+    </table></div>
+    <section class="panel"><h3>Valor acumulado al cierre de cada año (po)</h3>${vchart(hist, 'po')}</section>
+    <div>${advanceBlock('mina', 'Lo que hay al final pasa a ser el inicio del año siguiente; añadidos y gastos vuelven a 0.')}</div>
+  </div>`;
+};
+
+VIEWS.tesoro = () => {
+  const bal = balances(); const t = totTesoro();
+  const ubic = [...new Set([...S.monedas.map(m => m.ubicacion), ...S.objetos.map(o => o.ubicacion), ...S.gemas.map(g => g.ubicacion), 'Castillo Ravenloft', 'Hrakhamar'].filter(Boolean))];
+  const quienes = [...new Set([...PERSONAJES.filter(p => p !== 'Inquisición'), ...S.monedas.map(m => m.quien)].filter(Boolean))];
+  const movs = [...S.monedas].sort((a, b) => (b.orden || 0) - (a.orden || 0));
+  const gemas = [...S.gemas].sort((a, b) => (a.orden || 0) - (b.orden || 0));
+  const objs = [...S.objetos].sort((a, b) => (a.orden || 0) - (b.orden || 0));
+  return `<div class="sheet">
+    <div class="head"><div><h2>Tesoro de la Orden</h2><p>El saldo de monedas sale de sumar entradas y restar salidas. 1 pp = 10 po · 1 pe = ½ po · 1 pp de plata = 1/10 po · 1 pc = 1/100 po.</p></div></div>
+    <div class="stats">
+      <div class="stat"><div class="k">Total</div><div class="v">${fmt(t.total, 0)} po</div></div>
+      <div class="stat"><div class="k">Monedas</div><div class="v">${fmt(t.monedas, 2)} po</div></div>
+      <div class="stat"><div class="k">Gemas</div><div class="v">${fmt(t.gemas, 0)} po</div></div>
+      <div class="stat"><div class="k">Objetos con valor</div><div class="v">${fmt(t.objetos, 0)} po</div></div>
+    </div>
+    <div class="cols2">
+      <section><h3>Saldo de monedas</h3><div class="tbl"><table>
+        <thead><tr><th>Metal</th><th>Ubicación</th><th class="r">Monedas</th><th class="r">Valor (po)</th></tr></thead>
+        <tbody>${bal.map(r => `<tr><td class="name">${esc(r.metal)}</td><td>${esc(r.ubicacion)}</td><td class="r">${fmt(r.cant, 2)}</td><td class="calc">${fmt(r.po, 2)}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">Sin monedas.</td></tr>'}</tbody>
+        <tfoot><tr><td colspan="3">Total</td><td class="r">${fmt(t.monedas, 2)}</td></tr></tfoot></table></div></section>
+      <section><h3>Gemas</h3><div class="tbl"><table>
+        <thead><tr><th>Gema</th><th>Ubicación</th><th class="r">Valor (po)</th><th class="r">Cantidad</th><th class="r">Total</th><th></th></tr></thead>
+        <tbody>${gemas.map(g => `<tr><td>${txtIn('gem', g.id, 'tipo', g.tipo, 'Gema')}</td><td>${txtIn('gem', g.id, 'ubicacion', g.ubicacion, 'Ubicación')}</td>
+          <td class="r">${numIn('gem', g.id, 'valor', g.valor)}</td><td class="r">${numIn('gem', g.id, 'cantidad', g.cantidad)}</td><td class="calc">${fmt((g.valor || 0) * (g.cantidad || 0), 0)}</td><td>${delBtn('delgem', g.id)}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">Sin gemas.</td></tr>'}</tbody>
+        <tfoot><tr><td colspan="4">Total</td><td class="r">${fmt(t.gemas, 0)}</td><td></td></tr></tfoot></table></div>
+        <details class="adder" id="add-gem"><summary>Añadir gemas</summary><form class="add" data-form="gem">
+          <label>Gema<input name="tipo" required maxlength="40" list="dl-gemas"></label><label>Ubicación<input name="ubicacion" required list="dl-ubic" value="Castillo Ravenloft"></label>
+          <label>Valor (po)<input name="valor" type="number" step="any" required></label><label>Cantidad<input name="cantidad" type="number" step="any" value="1"></label>
+          <button class="btn" type="submit">Añadir</button></form></details></section>
+    </div>
+    <section><h3>Movimientos de monedas</h3>
+      <form class="add" data-form="mov">
+        <label>Tipo<select name="tipo"><option value="entrada">Entrada</option><option value="salida">Salida</option></select></label>
+        <label>Fecha<input name="fecha" maxlength="20" placeholder="5-5-8" style="width:9ch"></label>
+        <label>Quién<input name="quien" required list="dl-quien" maxlength="40"></label>
+        <label>Ubicación<input name="ubicacion" required list="dl-ubic" value="Castillo Ravenloft" maxlength="60"></label>
+        <label>Metal<select name="metal">${Object.keys(METALES).map(m => `<option ${m === 'Oro' ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
+        <label>Cantidad<input name="cantidad" type="number" step="any" min="0" required></label>
+        <label class="grow">Motivo<input name="nota" maxlength="200" placeholder="Comprar palantir en Daggerford"></label>
+        <button class="btn seal" type="submit">Registrar</button></form>
+      <div class="tbl" style="margin-top:10px"><table>
+        <thead><tr><th>Fecha</th><th>Tipo</th><th>Quién</th><th>Ubicación</th><th>Metal</th><th class="r">Cantidad</th><th>Motivo</th><th></th></tr></thead>
+        <tbody>${movs.map(m => `<tr><td class="sub">${esc(m.fecha) || '—'}</td><td>${m.tipo === 'salida' ? '<span class="flag" style="color:var(--crit)">Salida</span>' : '<span class="flag" style="color:var(--ok)">Entrada</span>'}</td>
+          <td>${esc(m.quien)}</td><td>${esc(m.ubicacion)}</td><td>${esc(m.metal)}</td><td class="r">${m.tipo === 'salida' ? '−' : '+'}${fmt(m.cantidad, 2)}</td><td class="sub">${esc(m.nota)}</td><td>${delBtn('delmov', m.id)}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">Sin movimientos.</td></tr>'}</tbody>
+      </table></div></section>
+    <section><h3>Objetos</h3><div class="tbl"><table>
+      <thead><tr><th>Objeto</th><th>Tipo</th><th>Mágico</th><th>Ubicación</th><th>Observación</th><th class="r">Cant.</th><th class="r">Valor ud. (po)</th><th></th></tr></thead>
+      <tbody>${objs.map(o => `<tr><td class="name">${esc(o.nombre)}</td><td class="sub">${esc(o.tipo)}</td><td>${o.magico ? '<span class="tag">Mágico</span>' : ''}</td>
+        <td>${txtIn('obj', o.id, 'ubicacion', o.ubicacion, 'Ubicación')}</td><td>${txtIn('obj', o.id, 'nota', o.nota, 'Observación')}</td>
+        <td class="r">${numIn('obj', o.id, 'cantidad', o.cantidad)}</td><td class="r">${numIn('obj', o.id, 'valor', o.valor)}</td><td>${delBtn('delobj', o.id)}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">Sin objetos.</td></tr>'}</tbody>
+    </table></div>
+    <details class="adder" id="add-obj"><summary>Añadir un objeto</summary><form class="add" data-form="obj">
+      <label class="grow">Objeto<input name="nombre" required maxlength="80"></label>
+      <label>Tipo<input name="tipo" list="dl-tipos" maxlength="40" value="Objeto maravilloso"></label>
+      <label>Mágico<select name="magico"><option value="1">Sí</option><option value="0">No</option></select></label>
+      <label>Ubicación<input name="ubicacion" list="dl-ubic" value="Castillo Ravenloft" maxlength="60"></label>
+      <label class="grow">Observación<input name="nota" maxlength="200"></label>
+      <label>Cantidad<input name="cantidad" type="number" step="any" value="1"></label><label>Valor ud. (po)<input name="valor" type="number" step="any" value="0"></label>
+      <button class="btn" type="submit">Añadir</button></form></details></section>
+    <datalist id="dl-ubic">${ubic.map(u => `<option value="${esc(u)}">`).join('')}</datalist>
+    <datalist id="dl-quien">${quienes.map(u => `<option value="${esc(u)}">`).join('')}</datalist>
+    <datalist id="dl-gemas">${['Diamante','Rubí','Zafiro','Esmeralda','Ópalo','Perla negra','Amatista','Genérica'].map(u => `<option value="${u}">`).join('')}</datalist>
+    <datalist id="dl-tipos">${[...new Set(['Arma','Armadura','Equipo de aventuras','Objeto maravilloso','Obra de arte', ...S.objetos.map(o => o.tipo)])].map(u => `<option value="${esc(u)}">`).join('')}</datalist>
+  </div>`;
+};
+
+VIEWS.cronica = () => {
+  const quien = [...new Set([...PERSONAJES, ...S.cronica.map(e => e.quien)].filter(Boolean))];
+  const filtro = V.filtro.filter(q => quien.includes(q));
+  const evs = S.cronica.filter(e => !filtro.length || filtro.includes(e.quien))
+    .sort((a, b) => (b.anio * 12 + b.mes) - (a.anio * 12 + a.mes) || PERSONAJES.indexOf(a.quien) - PERSONAJES.indexOf(b.quien));
+  const byYear = new Map(); for (const e of evs) { if (!byYear.has(e.anio)) byYear.set(e.anio, []); byYear.get(e.anio).push(e); }
+  const ed = V.editEv ? S.cronica.find(e => e.id === V.editEv) : null;
+  const f = ed || { anio: '', mes: 1, anioFin: '', mesFin: '', quien: 'Inquisición', texto: '' };
+  const mesSel = (name, v, opt) => `<select name="${name}">${opt ? '<option value="">—</option>' : ''}${MESES.map((m, i) => `<option value="${i + 1}" ${+v === i + 1 ? 'selected' : ''}>${i + 1} · ${m}</option>`).join('')}</select>`;
+  return `<div class="sheet">
+    <div class="head"><div><h2>Crónica</h2><p>Lo que ha hecho la Orden y cada uno de sus miembros, mes a mes, con el calendario de Barovia. Los meses seguidos con la misma actividad aparecen como un periodo.</p></div></div>
+    <form class="add" data-form="ev" id="form-ev">
+      <label>Año<input name="anio" id="ev-anio" type="number" min="0" required value="${esc(f.anio)}"></label>
+      <label>Mes${mesSel('mes', f.mes)}</label>
+      <label>Hasta año<input name="anioFin" type="number" min="0" value="${ed && (ed.anioFin !== ed.anio || ed.mesFin !== ed.mes) ? esc(f.anioFin) : ''}" placeholder="opcional"></label>
+      <label>Hasta mes${mesSel('mesFin', ed && (ed.anioFin !== ed.anio || ed.mesFin !== ed.mes) ? f.mesFin : '', true)}</label>
+      <label>Quién<input name="quien" list="dl-pj" required maxlength="40" value="${esc(f.quien)}"></label>
+      <label class="grow">Qué ocurrió<input name="texto" required maxlength="400" value="${esc(f.texto)}"></label>
+      <button class="btn seal" type="submit">${ed ? 'Guardar cambios' : 'Añadir a la crónica'}</button>
+      ${ed ? '<button class="btn ghost" type="button" data-act="cancelev">Cancelar</button>' : ''}
+    </form>
+    <datalist id="dl-pj">${quien.map(q => `<option value="${esc(q)}">`).join('')}</datalist>
+    <div class="filters"><span class="ui muted" style="font-size:13px;margin-right:4px">Mostrar</span>
+      <button class="chip" data-act="filtro" data-q="" aria-pressed="${!filtro.length}">Todos</button>
+      ${quien.map(q => `<button class="chip" data-act="filtro" data-q="${esc(q)}" aria-pressed="${filtro.includes(q)}">${esc(q)}</button>`).join('')}</div>
+    ${evs.length ? [...byYear.entries()].map(([y, list]) => `<div class="year-block"><div class="yr">Año ${y}<small>${list.length} ${list.length === 1 ? 'entrada' : 'entradas'}</small></div>
+      <ul class="events">${list.map(e => `<li class="ev"><span class="when">${esc(rango(e))}</span><span class="what"><b>${esc(e.quien)}</b>${esc(e.texto)}</span>
+        <span class="tools"><button class="x" data-act="editev" data-id="${esc(e.id)}" data-needs-write>Editar</button>${delBtn('delev', e.id)}</span></li>`).join('')}</ul></div>`).join('')
+      : '<p class="empty">No hay entradas para este filtro.</p>'}
+  </div>`;
+};
+
+VIEWS.objetivos = () => {
+  const list = [...S.objetivos].sort((a, b) => (a.conseguido - b.conseguido) || (a.orden || 0) - (b.orden || 0));
+  const ok = S.objetivos.filter(o => o.conseguido).length;
+  return `<div class="sheet">
+    <div class="head"><div><h2>Objetivos de la Orden</h2><p>${ok} de ${S.objetivos.length} cumplidos. Marca la casilla cuando se consiga uno.</p>
+      <div class="progress"><i style="width:${S.objetivos.length ? ok / S.objetivos.length * 100 : 0}%"></i></div></div></div>
+    ${list.length ? `<ul class="goals">${list.map(o => `<li class="${o.conseguido ? 'done' : ''}">
+      <input type="checkbox" id="i-goal-${esc(o.id)}" data-bind="goal" data-a="${esc(o.id)}" ${o.conseguido ? 'checked' : ''} aria-label="Conseguido" ${dis()}>
+      <span class="t">${esc(o.texto)}</span><span class="tag">${esc(o.quien)}</span>${delBtn('delgoal', o.id)}</li>`).join('')}</ul>` : '<p class="empty">Todavía no hay objetivos.</p>'}
+    <form class="add" data-form="goal"><label class="grow">Nuevo objetivo<input name="texto" required maxlength="200" placeholder="Explorar y conquistar otros dominios"></label>
+      <label>Propuesto por<input name="quien" list="dl-pj2" required maxlength="40" value="Lander"></label><button class="btn seal" type="submit">Añadir</button></form>
+    <datalist id="dl-pj2">${PERSONAJES.map(q => `<option value="${esc(q)}">`).join('')}</datalist>
+  </div>`;
+};
+
+function emptyView(t, msg) { return `<div class="sheet"><div class="head"><h2>${t}</h2></div><p class="empty">${msg}</p></div>`; }
+
+/* ---------- bindings (inline edits) ---------- */
+const LABEL = { poblacion: 'población', bajas: 'bajas', desplazamientos: 'desplazamientos', indCrec: 'índice de crecimiento', maximo: 'máximo', lbDiarias: 'lb/día', indEjercito: 'índice de ejército',
+  anadidas: 'añadidas', sacrificadas: 'sacrificadas', animales: 'animales', consumoPorAnimal: 'forraje por animal', carne: 'carne', leche: 'leche', huevos: 'huevos', lana: 'lana',
+  caza: 'millas de caza', pesca: 'millas de pesca', trigo: 'millas de trigo', legumbres: 'millas de legumbres', frutales: 'millas de frutales', uva: 'millas de vid',
+  trigoTierra: 'tierra del trigo', legumbresTierra: 'tierra de las legumbres', frutalesTierra: 'tierra de los frutales', uvaTierra: 'tierra de la vid' };
+function yearBinder(c, nombre, rowName) {
+  return el => {
+    if (!guard()) return;
+    const y = latest(c), key = el.dataset.a, f = el.dataset.b, row = S[c][y]?.filas?.[key]; if (!row) return;
+    const isSel = el.tagName === 'SELECT'; const v = isSel ? el.value : num(el.value);
+    if (v == null) { toast('Escribe un número.'); el.value = row[f] ?? ''; return; }
+    if (row[f] === v) return;
+    upd(`${c}/y${y}`, { filas: { [key]: { [f]: v } } }).then(() => log(`cambió ${LABEL[f] || f} de ${rowName(row)} (${nombre}, año ${y}): ${isSel ? row[f] : fmt(row[f])} → ${isSel ? v : fmt(v)}`)).catch(() => {});
+  };
+}
+const BIND = {
+  pob: yearBinder('poblacion', 'población', r => `${r.region} · ${r.subraza || r.raza}`),
+  gan: yearBinder('ganado', 'ganado', r => r.especie),
+  tie: yearBinder('tierras', 'tierras', r => r.region),
+  min(el) {
+    if (!guard()) return; const y = latest('mina'), g = el.dataset.a, k = el.dataset.b, d = S.mina[y]; const v = num(el.value);
+    if (v == null) { toast('Escribe un número.'); return; } const old = d[g]?.[k] || 0; if (old === v) return;
+    const n = { trabajadores: 'trabajadores', anadir: 'añadido', gastos: 'gastado' }[g];
+    const what = g === 'trabajadores' ? k : (MINERALES.find(m => m.k === k)?.n || k).toLowerCase();
+    upd(`mina/y${y}`, { [g]: { [k]: v } }).then(() => log(`cambió ${n} (${what}) en la mina, año ${y}: ${fmt(old)} → ${fmt(v)}`)).catch(() => {});
+  },
+  minpoc(el) { if (!guard()) return; const y = latest('mina'); upd(`mina/y${y}`, { pocosTrabajadores: el.checked }).then(() => log(`${el.checked ? 'activó' : 'quitó'} la penalización por pocos trabajadores en la mina`)).catch(() => {}); },
+  goal(el) { if (!guard()) return; const o = S.objetivos.find(x => x.id === el.dataset.a); if (!o) return;
+    upd(`objetivos/${o.id}`, { conseguido: el.checked }).then(() => log(`${el.checked ? 'marcó como cumplido' : 'reabrió'} el objetivo «${o.texto}»`)).catch(() => {}); },
+  gem: listBinder('gemas', 'gema', o => o.tipo),
+  obj: listBinder('objetos', 'objeto', o => o.nombre),
+};
+function listBinder(c, nombre, label) {
+  return el => {
+    if (!guard()) return; const o = S[c].find(x => x.id === el.dataset.a); if (!o) return; const f = el.dataset.b;
+    const isNum = el.classList.contains('num'); const v = isNum ? num(el.value) : el.value.trim().slice(0, 200);
+    if (isNum && v == null) { toast('Escribe un número.'); return; } if (o[f] === v) return;
+    upd(`${c}/${o.id}`, { [f]: v }).then(() => log(`cambió ${{ cantidad: 'la cantidad', valor: 'el valor', ubicacion: 'la ubicación', nota: 'la observación', tipo: 'el nombre' }[f] || f} de ${nombre} «${label(o)}»: ${isNum ? fmt(o[f]) : (o[f] || '—')} → ${isNum ? fmt(v) : (v || '—')}`)).catch(() => {});
+  };
+}
+document.addEventListener('change', e => {
+  const el = e.target; if (!el.dataset || !el.dataset.bind) return;
+  el.dataset.dirty = ''; const h = BIND[el.dataset.bind]; if (h) h(el);
+});
+document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.dataset && e.target.dataset.bind && e.target.tagName === 'INPUT') e.target.blur(); });
+
+/* ---------- forms ---------- */
+const maxOrden = list => list.reduce((m, x) => Math.max(m, x.orden || 0), 0) + 1;
+const FORMS = {
+  pob(fd) { return addRow('poblacion', slug(fd.get('region') + ' ' + (fd.get('subraza') || fd.get('raza'))), {
+    raza: fd.get('raza'), subraza: fd.get('subraza') || '', region: fd.get('region'), poblacion: num(fd.get('poblacion')) || 0, bajas: 0, desplazamientos: 0,
+    indCrec: num(fd.get('indCrec')) || 0, maximo: num(fd.get('maximo')) || 0, lbDiarias: num(fd.get('lbDiarias')) || 0, indEjercito: num(fd.get('indEjercito')) || 0 }, r => `${r.region} · ${r.subraza || r.raza}`); },
+  gan(fd) { return addRow('ganado', slug(fd.get('especie') + ' ' + fd.get('region')), {
+    especie: fd.get('especie'), region: fd.get('region'), alimento: fd.get('alimento') || '', poblacion: 0, anadidas: num(fd.get('animales')) || 0, sacrificadas: 0, indCrec: 0,
+    animales: num(fd.get('animales')) || 0, maximo: num(fd.get('maximo')) || 0, consumoPorAnimal: num(fd.get('consumoPorAnimal')) || 0, carne: 0, leche: 0, huevos: 0, lana: 0 }, r => r.especie); },
+  tie(fd) { const r = { region: fd.get('region'), caza: num(fd.get('caza')) || 0, pesca: num(fd.get('pesca')) || 0 };
+    for (const k in CULTIVOS) { r[k] = 0; r[k + 'Tierra'] = 'No plantado'; } return addRow('tierras', slug(r.region), r, x => x.region); },
+  gem(fd) { const g = { tipo: fd.get('tipo').trim(), ubicacion: fd.get('ubicacion').trim(), valor: num(fd.get('valor')) || 0, cantidad: num(fd.get('cantidad')) || 0, nota: '', orden: maxOrden(S.gemas) };
+    return db.collection('gemas').add(g).then(() => log(`añadió ${fmt(g.cantidad)} × ${g.tipo} de ${fmt(g.valor)} po (${g.ubicacion})`)); },
+  mov(fd) { const m = { tipo: fd.get('tipo'), fecha: fd.get('fecha').trim(), quien: fd.get('quien').trim(), ubicacion: fd.get('ubicacion').trim(), metal: fd.get('metal'),
+      cantidad: Math.abs(num(fd.get('cantidad')) || 0), nota: fd.get('nota').trim(), orden: maxOrden(S.monedas) };
+    if (!m.cantidad) { toast('Indica una cantidad mayor que 0.'); return Promise.reject('skip'); }
+    return db.collection('monedas').add(m).then(() => log(`registró una ${m.tipo} de ${fmt(m.cantidad)} monedas de ${m.metal.toLowerCase()} a nombre de ${m.quien}${m.nota ? ' («' + m.nota + '»)' : ''}`)); },
+  obj(fd) { const o = { nombre: fd.get('nombre').trim(), tipo: fd.get('tipo').trim(), magico: fd.get('magico') === '1', ubicacion: fd.get('ubicacion').trim(), nota: fd.get('nota').trim(),
+      cantidad: num(fd.get('cantidad')) || 1, valor: num(fd.get('valor')) || 0, orden: maxOrden(S.objetos) };
+    return db.collection('objetos').add(o).then(() => log(`añadió el objeto «${o.nombre}» al tesoro`)); },
+  goal(fd) { const o = { texto: fd.get('texto').trim(), quien: fd.get('quien').trim(), conseguido: false, orden: maxOrden(S.objetivos) };
+    return db.collection('objetivos').add(o).then(() => log(`propuso un objetivo nuevo: «${o.texto}»`)); },
+  acceso(fd) {
+    const list = [...new Set(String(fd.get('emails') || '').split(/[\s,;]+/).map(s => s.trim().toLowerCase()).filter(s => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s)))];
+    if (DUENO && !list.includes(DUENO)) list.unshift(DUENO);
+    return db.doc('config/acceso').set({ editores: list }).then(() => log(`actualizó la lista de acceso (${list.length} ${list.length === 1 ? 'persona' : 'personas'})`));
+  },
+  ev(fd) {
+    const a0 = num(fd.get('anio')), mes = +fd.get('mes');
+    if (a0 == null) { toast('Indica el año.'); return Promise.reject('skip'); }
+    const anio = Math.round(a0);
+    let anioFin = num(fd.get('anioFin')), mesFin = +fd.get('mesFin');
+    if (anioFin == null && mesFin) anioFin = anio;
+    if (anioFin == null) { anioFin = anio; mesFin = mes; } if (!mesFin) mesFin = mes;
+    if (anioFin * 12 + mesFin < anio * 12 + mes) { toast('El final no puede ser anterior al inicio.'); return Promise.reject('skip'); }
+    const e = { anio, mes, anioFin: Math.round(anioFin), mesFin, quien: fd.get('quien').trim(), texto: fd.get('texto').trim() };
+    const ed = V.editEv;
+    const p = ed ? setDoc(`cronica/${ed}`, e) : db.collection('cronica').add(e);
+    return p.then(() => { V.editEv = null; log(`${ed ? 'corrigió' : 'añadió'} en la crónica (año ${anio}, ${MESES[mes - 1]}): ${e.quien} — ${e.texto}`); });
+  },
+};
+function addRow(c, key, row, label) {
+  const y = latest(c); if (y == null) { toast('No hay un año abierto.'); return Promise.reject('skip'); }
+  const d = S[c][y]; if (d.filas?.[key]) { toast('Ya existe esa fila en este año.'); return Promise.reject('skip'); }
+  row.orden = filas(d).reduce((m, [, f]) => Math.max(m, f.orden || 0), 0) + 1;
+  return upd(`${c}/y${y}`, { filas: { [key]: row } }).then(() => log(`añadió ${label(row)} (${c === 'poblacion' ? 'población' : c}, año ${y})`));
+}
+document.addEventListener('submit', e => {
+  const form = e.target; if (!form.dataset || !form.dataset.form) return; e.preventDefault();
+  if (!guard()) return;
+  const h = FORMS[form.dataset.form]; if (!h) return;
+  const btn = form.querySelector('[type=submit]'); if (btn) btn.disabled = true;
+  Promise.resolve().then(() => h(new FormData(form))).then(() => {
+    if (form.dataset.form !== 'ev' && form.dataset.form !== 'acceso') form.reset(); toast('Guardado.'); schedule();
+  }).catch(err => { if (err !== 'skip') toast(errMsg(err)); })
+    .finally(() => { if (btn) btn.disabled = false; });
+});
+
+/* ---------- clicks ---------- */
+const armed = new Map();
+function confirmClick(btn, go) {
+  const k = btn.dataset.act + btn.dataset.id;
+  if (armed.get(k)) { armed.delete(k); go(); return; }
+  armed.set(k, true); btn.classList.add('armed'); const prev = btn.textContent; btn.textContent = '¿Seguro?';
+  setTimeout(() => { armed.delete(k); if (btn.isConnected) { btn.classList.remove('armed'); btn.textContent = prev; } }, 3000);
+}
+const ACTS = {
+  entrar() { auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(e => {
+    if (e && e.code === 'auth/unauthorized-domain') toast('Este dominio no está autorizado en Firebase (Authentication → Configuración → Dominios autorizados).');
+    else if (e && e.code !== 'auth/popup-closed-by-user') toast('No se pudo entrar con Google. Inténtalo de nuevo.'); }); },
+  salir() { if (myId && db) db.doc('presencia/' + myId).set({ ts: 0 }, { merge: true }).catch(() => {}); auth.signOut(); },
+  importar(b) { if (!esDueno) return; confirmClick(b, importar); },
+  year(b) { V.year[b.dataset.c] = +b.dataset.y; schedule(); },
+  filtro(b) { const q = b.dataset.q; if (!q) V.filtro = []; else V.filtro = V.filtro.includes(q) ? V.filtro.filter(x => x !== q) : [...V.filtro, q]; store.set('filtro', V.filtro); schedule(); },
+  editev(b) { V.editEv = b.dataset.id; schedule(); requestAnimationFrame(() => { const f = $('#form-ev'); if (f) { f.scrollIntoView({ block: 'center', behavior: 'smooth' }); $('#ev-anio')?.focus({ preventScroll: true }); } }); },
+  cancelev() { V.editEv = null; schedule(); },
+  advance(b) { if (!guard()) return; confirmClick(b, () => advanceYear(b.dataset.c)); },
+  delrow(b) { if (!guard()) return; confirmClick(b, () => { const [c, key] = b.dataset.id.split('|'); const y = latest(c); const r = S[c][y]?.filas?.[key];
+    upd(`${c}/y${y}`, { filas: { [key]: null } }).then(() => log(`quitó ${r?.region || r?.especie || key} (${c === 'poblacion' ? 'población' : c}, año ${y})`)).catch(() => {}); }); },
+  delmov(b) { delFrom(b, 'monedas', m => `borró el movimiento de ${fmt(m.cantidad)} monedas de ${String(m.metal).toLowerCase()} de ${m.quien}`); },
+  delgem(b) { delFrom(b, 'gemas', g => `borró ${fmt(g.cantidad)} × ${g.tipo} del tesoro`); },
+  delobj(b) { delFrom(b, 'objetos', o => `borró el objeto «${o.nombre}» del tesoro`); },
+  delgoal(b) { delFrom(b, 'objetivos', o => `borró el objetivo «${o.texto}»`); },
+  delev(b) { delFrom(b, 'cronica', e => `borró de la crónica: ${e.quien} — ${e.texto}`); },
+};
+function delFrom(b, c, msg) {
+  if (!guard()) return; const o = S[c].find(x => x.id === b.dataset.id); if (!o) return;
+  confirmClick(b, () => delDoc(`${c}/${o.id}`).then(() => log(msg(o))).catch(() => {}));
+}
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-tab]'); if (t) { setTab(t.dataset.tab); return; }
+  const b = e.target.closest('[data-act]'); if (b && !b.disabled && ACTS[b.dataset.act]) ACTS[b.dataset.act](b);
+});
+function setTab(k) {
+  V.tab = TABS.some(t => t[0] === k) ? k : 'resumen'; store.set('tab', V.tab);
+  try { history.replaceState(null, '', '#' + V.tab); } catch {}
+  latido();
+  schedule(); window.scrollTo({ top: 0 });
+}
+
+async function advanceYear(c) {
+  const y = latest(c), d = S[c][y]; if (!d) return; const ny = y + 1; const ref = db.doc(`${c}/y${ny}`);
+  try {
+    let next;
+    if (c === 'mina') {
+      const m = calcMina(d); const ini = {}, zero = {}; for (const x of MINERALES) { ini[x.k] = Math.round(m.min[x.k].fin * 1e6) / 1e6; zero[x.k] = 0; }
+      next = { anio: ny, trabajadores: { ...d.trabajadores }, pocosTrabajadores: !!d.pocosTrabajadores, inicial: ini, anadir: zero, gastos: { ...zero } };
+    } else {
+      const f = {};
+      for (const [k, r] of filas(d)) {
+        if (c === 'poblacion') f[k] = { ...r, poblacion: calcPob(r).fin, bajas: 0, desplazamientos: 0 };
+        else if (c === 'ganado') f[k] = { ...r, poblacion: r.animales || 0, anadidas: 0, sacrificadas: 0 };
+        else f[k] = { ...r };
+      }
+      next = { anio: ny, filas: f };
+    }
+    // transaction: only one person can open the next year, even if two click at once
+    const creado = await db.runTransaction(async tx => { const snap = await tx.get(ref); if (snap.exists) return false; tx.set(ref, next); return true; });
+    if (!creado) { toast(`El año ${ny} ya está abierto.`); return; }
+    V.year[c] = ny;
+    log(`cerró el año ${y} y abrió el ${ny} en ${{ poblacion: 'población', ganado: 'ganado', tierras: 'tierras', mina: 'la mina' }[c]}`);
+    toast(`Año ${ny} abierto.`);
+  } catch (e) { toast(errMsg(e)); }
+}
+
+/* ---------- people ---------- */
+let peerList = [];
+function peersHtml(full) {
+  const chips = peerChips();
+  if (!chips) return full ? '<p class="empty">Solo tú, o la presencia en vivo no está disponible.</p>' : '';
+  return `<div class="peers" style="justify-content:flex-start">${chips}</div>`;
+}
+function peerChips() {
+  const ps = peerList.filter(p => p.kind === 'viewer');
+  if (!ps.length) return '';
+  const seen = new Set(); const out = [];
+  for (const p of ps) { const id = p.by || p.peer; if (seen.has(id)) continue; seen.add(id);
+    const pr = p.by ? NAMES[p.by] : null; const name = p.isMe ? 'Tú' : ((pr && pr.name) || 'Alguien');
+    const tab = TABS.find(t => t[0] === p.presence?.tab);
+    out.push(`<span class="peer">${pr ? `<img src="${esc(pr.avatarUrl)}" alt="">` : '<span class="dot on" style="margin:0 2px 0 6px"></span>'}${esc(name)}${tab ? ` <i>· ${esc(tab[1])}</i>` : ''}</span>`); }
+  return out.join('');
+}
+// names come from the `personas` collection (each member writes their own on sign-in)
+function resolveNames() {}
+function renderPeers() { $('#peers').innerHTML = peerChips(); const side = $('#peers-side'); if (side) side.innerHTML = peersHtml(true); }
+let presencia = [];
+function buildPeers() {
+  const limite = Date.now() - 150000;
+  peerList = presencia.filter(p => (p.ts || 0) > limite).map(p => ({ kind: 'viewer', by: p.id, peer: p.id, isMe: p.id === myId, presence: { tab: p.tab } }));
+  renderPeers();
+}
+function latido() {
+  if (!db || !myId || !miembro || document.visibilityState === 'hidden') return;
+  db.doc('presencia/' + myId).set({ tab: V.tab, ts: Date.now() }, { merge: true }).catch(() => {});
+}
+async function importar() {
+  try {
+    const res = await fetch('seed.json', { cache: 'no-store' }); if (!res.ok) throw new Error('seed');
+    const data = await res.json(); const batch = db.batch(); let n = 0;
+    for (const c in data) for (const id in data[c]) { batch.set(db.doc(`${c}/${id}`), data[c][id]); n++; }
+    await batch.commit();
+    log(`importó los datos del Excel (${n} registros)`); toast(`Importados ${n} registros.`);
+  } catch (e) { toast(e && e.code ? errMsg(e) : 'No se pudo leer seed.json. Comprueba que lo subiste junto a index.html.'); }
+}
+
+/* ---------- boot ---------- */
+function notice(msg) { const n = $('#notice'); n.textContent = msg || ''; n.hidden = !msg; }
+function onErr(e) { if (e && e.code === 'permission-denied') { connected = false; notice('Ya no tienes acceso a este archivo.'); schedule(); } }
+let unsubs = [];
+function subYears(c) {
+  unsubs.push(db.collection(c).onSnapshot(snap => { const m = {}; snap.docs.forEach(d => { const x = d.data(); if (x && x.anio != null) m[x.anio] = x; });
+    S[c] = m; S.ready[c] = true; connected = true; schedule(); }, onErr));
+}
+function subList(c, q) {
+  unsubs.push((q || db.collection(c)).onSnapshot(snap => { S[c] = snap.docs.map(d => ({ id: d.id, ...d.data() })); S.ready[c] = true; connected = true; schedule(); }, onErr));
+}
+function arrancar() {
+  ['poblacion', 'ganado', 'tierras', 'mina'].forEach(subYears);
+  ['monedas', 'gemas', 'objetos', 'cronica', 'objetivos'].forEach(c => subList(c));
+  subList('registro', db.collection('registro').orderBy('ts', 'desc').limit(40));
+  unsubs.push(db.collection('personas').onSnapshot(snap => {
+    snap.docs.forEach(d => { const p = d.data(); NAMES[d.id] = { name: p.nombre || '', avatarUrl: p.foto || '' }; }); renderPeers(); schedule(); }, () => {}));
+  unsubs.push(db.collection('presencia').onSnapshot(snap => { presencia = snap.docs.map(d => ({ id: d.id, ...d.data() })); buildPeers(); }, () => {}));
+  if (esDueno) unsubs.push(db.doc('config/acceso').onSnapshot(s => { acceso = s.exists ? s.data() : null; schedule(); }, () => {}));
+  db.doc('personas/' + myId).set({ nombre: me.displayName || me.email.split('@')[0], foto: me.photoURL || '' }, { merge: true }).catch(() => {});
+  latido();
+}
+function parar() {
+  unsubs.forEach(u => { try { u(); } catch {} }); unsubs = [];
+  for (const k of ['poblacion', 'ganado', 'tierras', 'mina']) S[k] = {};
+  for (const k of ['monedas', 'gemas', 'objetos', 'cronica', 'objetivos', 'registro']) S[k] = [];
+  S.ready = {}; presencia = []; peerList = []; connected = false;
+}
+async function comprobarAcceso() {
+  const email = (me.email || '').toLowerCase();
+  esDueno = !!DUENO && email === DUENO;
+  try {
+    const s = await db.doc('config/acceso').get();
+    acceso = s.exists ? s.data() : null;
+    if (esDueno && !acceso) { acceso = { editores: [DUENO] }; await db.doc('config/acceso').set(acceso); }
+    miembro = esDueno || !!(acceso && (acceso.editores || []).includes(email));
+  } catch (e) { miembro = esDueno; if (!esDueno && e.code !== 'permission-denied') toast(errMsg(e)); }
+}
+(function boot() {
+  const tabFromHash = (location.hash || '').slice(1);
+  V.tab = TABS.some(t => t[0] === tabFromHash) ? tabFromHash : store.get('tab', 'resumen');
+  render();
+  if (!CFG || !CFG.apiKey || /PEGA/.test(CFG.apiKey) || !window.firebase) return;
+  firebase.initializeApp(CFG);
+  auth = firebase.auth(); db = firebase.firestore();
+  auth.onAuthStateChanged(async u => {
+    parar(); me = u; myId = u ? u.uid : null; miembro = null; esDueno = false; canWrite = true; authReady = true; notice('');
+    schedule();
+    if (!u) return;
+    await comprobarAcceso(); schedule();
+    if (miembro) arrancar();
+  });
+  setInterval(latido, 60000);
+  setInterval(buildPeers, 30000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') latido(); });
+  setInterval(() => { if (V.tab === 'resumen' && !document.activeElement?.dataset?.bind) schedule(); }, 60000);
+})();
+</script>
+</body>
+</html>
