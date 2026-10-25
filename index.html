@@ -195,6 +195,15 @@ details.adder[open] > summary::before { content: "− " }
 .legend { display: flex; flex-wrap: wrap; gap: 14px; font-family: var(--f-ui); font-size: 12px; color: var(--muted); margin-top: 10px }
 .legend i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: -1px }
 @media (prefers-reduced-motion: no-preference) { .fill, .vchart .bar, .progress i { transition: width .4s ease, height .4s ease } }
+/* planned (future) years: italic chips, outlined bars, muted blocks */
+.chip.plan { font-style: italic; border-style: dashed; color: var(--muted) }
+.chip.plan[aria-pressed="true"] { color: var(--bg) }
+.plan-key { font-style: italic; color: var(--muted); margin-left: 6px; font-size: 12px }
+.vchart .bar.plan { background: transparent; border: 1.5px dashed var(--muted); border-bottom: 0 }
+.notice.plan-note { border-left-color: var(--gold) }
+details.plan-block { border: 1px dashed var(--line); padding: 10px 14px; background: var(--panel) }
+details.plan-block > summary { cursor: pointer; font-family: var(--f-ui); font-size: 14px; color: var(--muted) }
+details.plan-block .year-block > .yr { color: var(--muted) }
 .who-am-i { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap }
 .gate { max-width: 520px; margin: 40px auto; text-align: center; display: grid; gap: 14px; justify-items: center }
 .gate p { color: var(--muted); margin: 0 }
@@ -317,7 +326,16 @@ const CFG = window.FIREBASE_CONFIG || null;
 const NAMES = {};
 const years = c => Object.keys(S[c]).map(Number).sort((a, b) => a - b);
 const latest = c => { const y = years(c); return y.length ? y[y.length - 1] : null; };
-const selYear = c => (V.year[c] != null && S[c][V.year[c]]) ? V.year[c] : latest(c);
+// The campaign year is the shared "present" (campana/estado.anio). Years after it are plans
+// already worked out in the Excel: visible, but read-only and left out of the totals.
+const actual = () => S.campana != null ? S.campana : (latest('poblacion') ?? 0);
+const presente = c => { const ys = years(c).filter(y => y <= actual()); return ys.length ? ys[ys.length - 1] : null; };
+const esPlan = y => y > actual();
+const selYear = c => {
+  if (V.year[c] != null && S[c][V.year[c]]) return V.year[c];
+  const p = presente(c); if (p != null) return p;
+  const ys = years(c); return ys.length ? ys[0] : null;
+};
 const filas = d => Object.entries(d?.filas || {}).filter(([, f]) => f).sort((a, b) => (a[1].orden || 0) - (b[1].orden || 0));
 const atOrBefore = (c, y) => { const ys = years(c).filter(v => v <= y); return ys.length ? S[c][ys[ys.length - 1]] : null; };
 
@@ -427,9 +445,8 @@ document.addEventListener('input', e => { if (e.target.dataset && e.target.datas
 
 function renderHeader() {
   $('#tabs').innerHTML = TABS.map(([k, n]) => `<button role="tab" data-tab="${k}" aria-selected="${V.tab === k}">${n}</button>`).join('');
-  const ev = S.cronica.reduce((m, e) => (!m || e.anio * 12 + e.mes > m.anio * 12 + m.mes) ? e : m, null);
   $('#fecha').innerHTML = `<span class="dot ${connected ? 'on' : ''}" title="${connected ? 'En vivo' : 'Sin conexión en vivo'}"></span>` +
-    (ev ? `Crónica al día: <b>año ${ev.anio}, ${esc(MESES[ev.mes - 1])}</b>` : (db ? 'Archivo conectado' : 'Conectando con el archivo…'));
+    (connected ? `Campaña en curso: <b>año ${actual()}</b>` : (db ? 'Archivo conectado' : 'Conectando con el archivo…'));
   $('#whoami').innerHTML = me ? `<span>${esc(me.displayName || me.email)}</span><button class="x" data-act="salir">Salir</button>` : '';
 }
 function gateView() {
@@ -465,7 +482,8 @@ function selIn(kind, a, b, v, opts) {
 }
 function yearChips(c, label = 'Año') {
   const ys = years(c), cur = selYear(c);
-  return `<div class="years"><span>${label}</span>` + ys.map(y => `<button class="chip" data-act="year" data-c="${c}" data-y="${y}" aria-pressed="${y === cur}">${y}</button>`).join('') + '</div>';
+  return `<div class="years"><span>${label}</span>` + ys.map(y => `<button class="chip ${esPlan(y) ? 'plan' : ''}" data-act="year" data-c="${c}" data-y="${y}" aria-pressed="${y === cur}" title="${esPlan(y) ? 'Planificado' : y === actual() ? 'Año en curso' : 'Año cerrado'}">${y}</button>`).join('') +
+    (ys.some(esPlan) ? '<span class="plan-key">en cursiva: planificado</span>' : '') + '</div>';
 }
 function delBtn(act, id, label = 'Borrar') { return `<button class="x" data-act="${act}" data-id="${esc(id)}" data-needs-write>${label}</button>`; }
 function vchart(points, unit) {
@@ -473,9 +491,9 @@ function vchart(points, unit) {
   const max = Math.max(...points.map(p => p.v), 1);
   const n = points.length;
   return `<div class="vchart" role="img" aria-label="${esc(points.map(p => p.x + ': ' + fmt(p.v, 0)).join(', '))}">` +
-    points.map((p, i) => `<div class="col" tabindex="0"><span class="tip">${esc(p.x)}: ${esc(p.tip || fmt(p.v, 0) + ' ' + unit)}</span>` +
+    points.map((p, i) => `<div class="col" tabindex="0"><span class="tip">${esc(p.x)}: ${esc(p.tip || fmt(p.v, 0) + ' ' + unit)}${p.plan ? ' (planificado)' : ''}</span>` +
       ((i === n - 1 || i === 0) ? `<span class="lbl">${esc(p.short || big(p.v))}</span>` : '') +
-      `<div class="bar" style="height:${Math.max(1, p.v / max * 100)}%"></div></div>`).join('') +
+      `<div class="bar ${p.plan ? 'plan' : ''}" style="height:${Math.max(1, p.v / max * 100)}%"></div></div>`).join('') +
     `</div><div class="xaxis">${points.map(p => `<span>${esc(p.x)}</span>`).join('')}</div>`;
 }
 function hbars(rows, max) {
@@ -483,21 +501,22 @@ function hbars(rows, max) {
     <div class="track"><div class="fill ${r.cls || ''}" style="width:${max > 0 ? Math.min(100, r.v / max * 100) : 0}%"></div></div>
     <div class="val">${r.val}</div>`).join('') + '</div>';
 }
-function advanceBlock(c, label) {
-  const y = latest(c);
+// Banner above a module's sheet saying whether the year shown is past, present or planned.
+function yearBanner(c) {
+  const y = selYear(c), a = actual();
   if (y == null) return '';
-  const sel = selYear(c);
-  if (sel !== y) return `<p class="muted ui">Estás viendo el año ${sel}, ya cerrado. Solo el año ${y} se puede editar.</p>`;
-  return `<button class="btn seal" data-act="advance" data-c="${c}" data-needs-write>Cerrar el año ${y} y abrir el ${y + 1}</button>
-    <span class="muted ui" style="font-size:13px"> ${label}</span>`;
+  if (esPlan(y)) return `<div class="notice plan-note">Año ${y} <b>planificado</b>. Ya está calculado, pero no se puede editar ni cuenta en los totales hasta que la campaña llegue a ese año (ahora estáis en el año ${a}).</div>`;
+  if (y < a) return `<div class="notice">Año ${y}, ya cerrado. Solo se edita el año en curso (${a}).</div>`;
+  return '';
 }
 
 /* ---------- views ---------- */
 const VIEWS = {};
 
 VIEWS.resumen = () => {
-  const yp = latest('poblacion'); const pd = S.poblacion[yp]; const tp = pd ? totPob(pd) : null;
-  const tt = totTesoro(); const ym = latest('mina'); const cm = ym != null ? calcMina(S.mina[ym]) : null;
+  const yp = presente('poblacion'); const pd = S.poblacion[yp]; const tp = pd ? totPob(pd) : null;
+  const tt = totTesoro(); const ym = presente('mina'); const cm = ym != null ? calcMina(S.mina[ym]) : null;
+  const minaPlan = years('mina').find(esPlan);
   const ok = S.objetivos.filter(o => o.conseguido).length;
   const td = atOrBefore('tierras', yp), gd = atOrBefore('ganado', yp);
   const tTi = td ? totTierras(td) : { caza: 0, pesca: 0, cultivos: 0, total: 0 }, tGa = gd ? totGanado(gd) : { comida: 0, consumo: 0 };
@@ -505,7 +524,7 @@ VIEWS.resumen = () => {
   const regiones = {}; if (pd) for (const [, f] of filas(pd)) { const c = calcPob(f); const r = regiones[f.region] = regiones[f.region] || { fin: 0, max: 0, ej: 0 }; r.fin += c.fin; r.max += f.maximo || 0; r.ej += c.ejercito; }
   const regRows = Object.entries(regiones).sort((a, b) => b[1].fin - a[1].fin);
   const maxReg = Math.max(1, ...regRows.map(([, r]) => r.max || r.fin));
-  const hist = years('poblacion').map(y => ({ x: y, v: totPob(S.poblacion[y]).fin, tip: fmt(totPob(S.poblacion[y]).fin, 0) + ' ciudadanos', short: fmt(totPob(S.poblacion[y]).fin, 0) }));
+  const hist = years('poblacion').filter(y => !esPlan(y)).map(y => ({ x: y, v: totPob(S.poblacion[y]).fin, tip: fmt(totPob(S.poblacion[y]).fin, 0) + ' ciudadanos', short: fmt(totPob(S.poblacion[y]).fin, 0) }));
   const foodRows = [
     { label: 'Cultivos', v: tTi.cultivos, val: big(tTi.cultivos) + ' lb' },
     { label: 'Ganado', v: tGa.comida, val: big(tGa.comida) + ' lb' },
@@ -516,12 +535,12 @@ VIEWS.resumen = () => {
   const ratio = tp && tp.anual ? prod / tp.anual : null;
   return `
   <div class="sheet">
-    <div class="head"><div><h2>Estado del dominio</h2><p>Lo esencial de la Orden de un vistazo. Todo se recalcula en cuanto alguien cambia un dato en cualquier pestaña.</p></div></div>
+    <div class="head"><div><h2>Estado del dominio · año ${actual()}</h2><p>Lo esencial de la Orden de un vistazo. Todo se recalcula en cuanto alguien cambia un dato en cualquier pestaña. Lo planificado para años futuros no cuenta en estos totales.</p></div></div>
     <div class="stats">
       <div class="stat"><div class="k">Ciudadanos · año ${yp ?? '—'}</div><div class="v">${tp ? fmt(tp.fin, 0) : '—'}</div><div class="s">${tp ? (tp.fin >= tp.inicio ? '+' : '') + fmt(tp.fin - tp.inicio, 0) + ' en el año' : 'Sin censo'}</div></div>
       <div class="stat"><div class="k">Ejército disponible</div><div class="v">${tp ? fmt(tp.ejercito, 0) : '—'}</div><div class="s">según índice por raza</div></div>
       <div class="stat"><div class="k">Tesoro de la Orden</div><div class="v">${fmt(tt.total, 0)} po</div><div class="s">monedas, gemas y objetos con valor</div></div>
-      <div class="stat"><div class="k">Mina de Hrakhamar · año ${ym ?? '—'}</div><div class="v">${cm ? fmt(cm.valor, 0) : '—'} po</div><div class="s">${cm ? '+' + fmt(cm.prodTot, 0) + ' po este año' : ''}</div></div>
+      <div class="stat"><div class="k">Mina de Hrakhamar</div><div class="v">${cm ? fmt(cm.valor, 0) + ' po' : 'Sin producir'}</div><div class="s">${cm ? '+' + fmt(cm.prodTot, 0) + ' po este año' : (minaPlan != null ? `empieza en el año ${minaPlan} (planificado)` : '')}</div></div>
       <div class="stat"><div class="k">Objetivos cumplidos</div><div class="v">${ok} / ${S.objetivos.length}</div><div class="progress"><i style="width:${S.objetivos.length ? ok / S.objetivos.length * 100 : 0}%"></i></div></div>
     </div>
     <div class="cols">
@@ -539,6 +558,7 @@ VIEWS.resumen = () => {
         <section class="panel"><h3>Ciudadanos al cierre de cada año</h3>${vchart(hist, 'ciudadanos')}</section>
       </div>
       <aside class="sheet">
+        ${campanaPanel()}
         ${duenoPanel()}
         <section class="panel"><h3>Ahora en el archivo</h3><div id="peers-side">${peersHtml(true)}</div></section>
         <section class="panel"><h3>Últimos cambios</h3>${feedHtml()}</section>
@@ -556,7 +576,7 @@ function feedHtml() {
 }
 
 VIEWS.poblacion = () => {
-  const y = selYear('poblacion'); const d = S.poblacion[y]; const edit = y === latest('poblacion');
+  const y = selYear('poblacion'); const d = S.poblacion[y]; const edit = y === actual();
   if (!d) return emptyView('Población', 'Aún no hay censo. Cuando se carguen los datos del Excel aparecerán aquí.');
   const t = totPob(d);
   const k = (key, f, v, w) => edit ? numIn('pob', key, f, v, w) : fmt(v);
@@ -570,6 +590,7 @@ VIEWS.poblacion = () => {
       <td>${edit ? delBtn('delrow', 'poblacion|' + key, 'Quitar') : ''}</td></tr>`; }).join('');
   return `<div class="sheet">
     <div class="head"><div><h2>Población y ejército</h2><p>Ciudadanos al cierre = población inicial + crecimiento + desplazamientos − bajas, redondeado hacia abajo y limitado al máximo de la región.</p></div>${yearChips('poblacion')}</div>
+    ${yearBanner('poblacion')}
     <div class="stats">
       <div class="stat"><div class="k">Ciudadanos al cierre</div><div class="v">${fmt(t.fin, 0)}</div><div class="s">empezó el año con ${fmt(t.inicio, 0)}</div></div>
       <div class="stat"><div class="k">Ejército</div><div class="v">${fmt(t.ejercito, 0)}</div></div>
@@ -588,12 +609,11 @@ VIEWS.poblacion = () => {
         <label>Máximo<input name="maximo" type="number" step="any" value="0"></label><label>Índice crec.<input name="indCrec" type="number" step="any" value="0.125"></label>
         <label>Índice ejército<input name="indEjercito" type="number" step="any" value="0.75"></label><label>lb/día<input name="lbDiarias" type="number" step="any" value="3"></label>
         <button class="btn" type="submit">Añadir</button></form></details>` : ''}
-    <div>${advanceBlock('poblacion', 'Los ciudadanos al cierre pasan a ser la población inicial; bajas y desplazamientos vuelven a 0.')}</div>
   </div>`;
 };
 
 VIEWS.ganado = () => {
-  const y = selYear('ganado'); const d = S.ganado[y]; const edit = y === latest('ganado');
+  const y = selYear('ganado'); const d = S.ganado[y]; const edit = y === actual();
   if (!d) return emptyView('Ganado', 'Aún no hay ganado registrado.');
   const t = totGanado(d);
   const k = (key, f, v, w) => edit ? numIn('gan', key, f, v, w) : fmt(v);
@@ -605,6 +625,7 @@ VIEWS.ganado = () => {
     <td>${edit ? delBtn('delrow', 'ganado|' + key, 'Quitar') : ''}</td></tr>`).join('');
   return `<div class="sheet">
     <div class="head"><div><h2>Ganado</h2><p>Cabezas, forraje y lo que da cada especie al año (en libras). El consumo de forraje se calcula con animales × lb por animal.</p></div>${yearChips('ganado')}</div>
+    ${yearBanner('ganado')}
     <div class="stats">
       <div class="stat"><div class="k">Animales</div><div class="v">${fmt(t.animales, 0)}</div></div>
       <div class="stat"><div class="k">Comida producida</div><div class="v">${big(t.comida)} lb</div><div class="s">carne ${big(t.carne)} · leche ${big(t.leche)} · huevos ${big(t.huevos)}</div></div>
@@ -622,12 +643,11 @@ VIEWS.ganado = () => {
         <label>Alimento<input name="alimento" maxlength="30" value="Pasto"></label><label>Animales<input name="animales" type="number" step="any" value="0"></label>
         <label>Máximo<input name="maximo" type="number" step="any" value="0"></label><label>lb forraje / animal<input name="consumoPorAnimal" type="number" step="any" value="0"></label>
         <button class="btn" type="submit">Añadir</button></form></details>` : ''}
-    <div>${advanceBlock('ganado', 'Los animales actuales pasan a ser la población inicial; añadidas y sacrificadas vuelven a 0.')}</div>
   </div>`;
 };
 
 VIEWS.tierras = () => {
-  const y = selYear('tierras'); const d = S.tierras[y]; const edit = y === latest('tierras');
+  const y = selYear('tierras'); const d = S.tierras[y]; const edit = y === actual();
   if (!d) return emptyView('Tierras', 'Aún no hay tierras registradas.');
   const t = totTierras(d);
   const k = (key, f, v) => edit ? numIn('tie', key, f, v) : fmt(v);
@@ -641,6 +661,7 @@ VIEWS.tierras = () => {
       <td class="calc">${big(c.total)}</td><td>${edit ? delBtn('delrow', 'tierras|' + key, 'Quitar') : ''}</td></tr>`; }).join('');
   return `<div class="sheet">
     <div class="head"><div><h2>Tierras: caza, pesca y cultivos</h2><p>Se mide en millas. Cada milla de caza da ${fmt(CAZA_PIEZAS_MILLA, 1)} piezas (${fmt(CAZA_LB_MILLA, 1)} lb) y cada milla de pesca ${fmt(PESCA_LB_MILLA, 0)} lb. La tierra fértil rinde más y el Crecimiento vegetal duplica la cosecha.</p></div>${yearChips('tierras')}</div>
+    ${yearBanner('tierras')}
     <div class="stats">
       <div class="stat"><div class="k">Producción total</div><div class="v">${big(t.total)} lb</div></div>
       <div class="stat"><div class="k">Cultivos</div><div class="v">${big(t.cultivos)} lb</div></div>
@@ -656,21 +677,21 @@ VIEWS.tierras = () => {
       <form class="add" data-form="tie"><label>Región<input name="region" required maxlength="60"></label>
         <label>Millas de caza<input name="caza" type="number" step="any" value="0"></label><label>Millas de pesca<input name="pesca" type="number" step="any" value="0"></label>
         <button class="btn" type="submit">Añadir</button></form></details>` : ''}
-    <div>${advanceBlock('tierras', 'Las tierras se copian tal cual al año siguiente.')}</div>
   </div>`;
 };
 
 VIEWS.mina = () => {
-  const y = selYear('mina'); const d = S.mina[y]; const edit = y === latest('mina');
+  const y = selYear('mina'); const d = S.mina[y]; const edit = y === actual();
   if (!d) return emptyView('Mina de Hrakhamar', 'Aún no hay registros de la mina.');
   const c = calcMina(d); const w = d.trabajadores || {};
   const k = (g, f, v) => edit ? numIn('min', g, f, v) : fmt(v);
-  const hist = years('mina').map(yy => { const v = calcMina(S.mina[yy]).valor; return { x: yy, v, tip: fmt(v, 0) + ' po', short: big(v) }; });
+  const hist = years('mina').map(yy => { const v = calcMina(S.mina[yy]).valor; return { x: yy, v, tip: fmt(v, 0) + ' po', short: big(v), plan: esPlan(yy) }; });
   const rows = MINERALES.map(m => { const r = c.min[m.k];
     return `<tr><td class="name">${m.n}<small>${m.rareza} · ${fmt(m.base, 0)} base</small></td><td class="r">${fmt(r.ini, 2)}</td>
       <td class="calc">+${fmt(r.prod, 2)}</td><td class="r">${k('anadir', m.k, r.add)}</td><td class="r">${k('gastos', m.k, r.gas)}</td><td class="calc">${fmt(r.fin, 2)}</td></tr>`; }).join('');
   return `<div class="sheet">
     <div class="head"><div><h2>Mina de Hrakhamar</h2><p>Valores en monedas de oro. Cada trabajador rinde según su raza (goblin 0,04 · humano 0,1 · enano 0,2) y se aplican las bonificaciones de la mina.</p></div>${yearChips('mina')}</div>
+    ${yearBanner('mina')}
     <div class="cols2">
       <section class="panel"><h3>Cuadrilla · año ${y}</h3>
         <div class="tbl" style="border:0"><table><tbody>
@@ -691,7 +712,6 @@ VIEWS.mina = () => {
       <tbody>${rows}</tbody><tfoot><tr><td>Total (po)</td><td class="r">${fmt(MINERALES.reduce((s, m) => s + c.min[m.k].ini, 0), 2)}</td><td class="r">+${fmt(c.prodTot, 2)}</td><td></td><td></td><td class="r">${fmt(c.valor, 2)}</td></tr></tfoot>
     </table></div>
     <section class="panel"><h3>Valor acumulado al cierre de cada año (po)</h3>${vchart(hist, 'po')}</section>
-    <div>${advanceBlock('mina', 'Lo que hay al final pasa a ser el inicio del año siguiente; añadidos y gastos vuelven a 0.')}</div>
   </div>`;
 };
 
@@ -766,7 +786,12 @@ VIEWS.cronica = () => {
   const filtro = V.filtro.filter(q => quien.includes(q));
   const evs = S.cronica.filter(e => !filtro.length || filtro.includes(e.quien))
     .sort((a, b) => (b.anio * 12 + b.mes) - (a.anio * 12 + a.mes) || PERSONAJES.indexOf(a.quien) - PERSONAJES.indexOf(b.quien));
-  const byYear = new Map(); for (const e of evs) { if (!byYear.has(e.anio)) byYear.set(e.anio, []); byYear.get(e.anio).push(e); }
+  const bloques = list => { const byYear = new Map(); for (const e of list) { if (!byYear.has(e.anio)) byYear.set(e.anio, []); byYear.get(e.anio).push(e); }
+    return [...byYear.entries()].map(([y, l]) => `<div class="year-block"><div class="yr">Año ${y}<small>${l.length} ${l.length === 1 ? 'entrada' : 'entradas'}</small></div>
+      <ul class="events">${l.map(e => `<li class="ev"><span class="when">${esc(rango(e))}</span><span class="what"><b>${esc(e.quien)}</b>${esc(e.texto)}</span>
+        <span class="tools"><button class="x" data-act="editev" data-id="${esc(e.id)}" data-needs-write>Editar</button>${delBtn('delev', e.id)}</span></li>`).join('')}</ul></div>`).join(''); };
+  const hechos = evs.filter(e => !esPlan(e.anio)), planes = evs.filter(e => esPlan(e.anio));
+  const pAnios = planes.map(e => e.anio);
   const ed = V.editEv ? S.cronica.find(e => e.id === V.editEv) : null;
   const f = ed || { anio: '', mes: 1, anioFin: '', mesFin: '', quien: 'Inquisición', texto: '' };
   const mesSel = (name, v, opt) => `<select name="${name}">${opt ? '<option value="">—</option>' : ''}${MESES.map((m, i) => `<option value="${i + 1}" ${+v === i + 1 ? 'selected' : ''}>${i + 1} · ${m}</option>`).join('')}</select>`;
@@ -786,10 +811,9 @@ VIEWS.cronica = () => {
     <div class="filters"><span class="ui muted" style="font-size:13px;margin-right:4px">Mostrar</span>
       <button class="chip" data-act="filtro" data-q="" aria-pressed="${!filtro.length}">Todos</button>
       ${quien.map(q => `<button class="chip" data-act="filtro" data-q="${esc(q)}" aria-pressed="${filtro.includes(q)}">${esc(q)}</button>`).join('')}</div>
-    ${evs.length ? [...byYear.entries()].map(([y, list]) => `<div class="year-block"><div class="yr">Año ${y}<small>${list.length} ${list.length === 1 ? 'entrada' : 'entradas'}</small></div>
-      <ul class="events">${list.map(e => `<li class="ev"><span class="when">${esc(rango(e))}</span><span class="what"><b>${esc(e.quien)}</b>${esc(e.texto)}</span>
-        <span class="tools"><button class="x" data-act="editev" data-id="${esc(e.id)}" data-needs-write>Editar</button>${delBtn('delev', e.id)}</span></li>`).join('')}</ul></div>`).join('')
-      : '<p class="empty">No hay entradas para este filtro.</p>'}
+    ${planes.length ? `<details class="plan-block" id="cron-plan"><summary>Planificado: ${planes.length} ${planes.length === 1 ? 'entrada' : 'entradas'} de los años ${Math.min(...pAnios)}–${Math.max(...pAnios)}, todavía no jugados</summary>
+      <div class="sheet" style="margin-top:12px">${bloques(planes)}</div></details>` : ''}
+    ${hechos.length ? bloques(hechos) : '<p class="empty">No hay entradas para este filtro.</p>'}
   </div>`;
 };
 
@@ -818,7 +842,7 @@ const LABEL = { poblacion: 'población', bajas: 'bajas', desplazamientos: 'despl
 function yearBinder(c, nombre, rowName) {
   return el => {
     if (!guard()) return;
-    const y = latest(c), key = el.dataset.a, f = el.dataset.b, row = S[c][y]?.filas?.[key]; if (!row) return;
+    const y = actual(), key = el.dataset.a, f = el.dataset.b, row = S[c][y]?.filas?.[key]; if (!row) return;
     const isSel = el.tagName === 'SELECT'; const v = isSel ? el.value : num(el.value);
     if (v == null) { toast('Escribe un número.'); el.value = row[f] ?? ''; return; }
     if (row[f] === v) return;
@@ -830,13 +854,13 @@ const BIND = {
   gan: yearBinder('ganado', 'ganado', r => r.especie),
   tie: yearBinder('tierras', 'tierras', r => r.region),
   min(el) {
-    if (!guard()) return; const y = latest('mina'), g = el.dataset.a, k = el.dataset.b, d = S.mina[y]; const v = num(el.value);
+    if (!guard()) return; const y = actual(), g = el.dataset.a, k = el.dataset.b, d = S.mina[y]; if (!d) return; const v = num(el.value);
     if (v == null) { toast('Escribe un número.'); return; } const old = d[g]?.[k] || 0; if (old === v) return;
     const n = { trabajadores: 'trabajadores', anadir: 'añadido', gastos: 'gastado' }[g];
     const what = g === 'trabajadores' ? k : (MINERALES.find(m => m.k === k)?.n || k).toLowerCase();
     upd(`mina/y${y}`, { [g]: { [k]: v } }).then(() => log(`cambió ${n} (${what}) en la mina, año ${y}: ${fmt(old)} → ${fmt(v)}`)).catch(() => {});
   },
-  minpoc(el) { if (!guard()) return; const y = latest('mina'); upd(`mina/y${y}`, { pocosTrabajadores: el.checked }).then(() => log(`${el.checked ? 'activó' : 'quitó'} la penalización por pocos trabajadores en la mina`)).catch(() => {}); },
+  minpoc(el) { if (!guard()) return; const y = actual(); if (!S.mina[y]) return; upd(`mina/y${y}`, { pocosTrabajadores: el.checked }).then(() => log(`${el.checked ? 'activó' : 'quitó'} la penalización por pocos trabajadores en la mina`)).catch(() => {}); },
   goal(el) { if (!guard()) return; const o = S.objetivos.find(x => x.id === el.dataset.a); if (!o) return;
     upd(`objetivos/${o.id}`, { conseguido: el.checked }).then(() => log(`${el.checked ? 'marcó como cumplido' : 'reabrió'} el objetivo «${o.texto}»`)).catch(() => {}); },
   gem: listBinder('gemas', 'gema', o => o.tipo),
@@ -898,7 +922,7 @@ const FORMS = {
   },
 };
 function addRow(c, key, row, label) {
-  const y = latest(c); if (y == null) { toast('No hay un año abierto.'); return Promise.reject('skip'); }
+  const y = actual(); if (!S[c][y]) { toast('No hay datos del año en curso en esta sección.'); return Promise.reject('skip'); }
   const d = S[c][y]; if (d.filas?.[key]) { toast('Ya existe esa fila en este año.'); return Promise.reject('skip'); }
   row.orden = filas(d).reduce((m, [, f]) => Math.max(m, f.orden || 0), 0) + 1;
   return upd(`${c}/y${y}`, { filas: { [key]: row } }).then(() => log(`añadió ${label(row)} (${c === 'poblacion' ? 'población' : c}, año ${y})`));
@@ -932,8 +956,8 @@ const ACTS = {
   filtro(b) { const q = b.dataset.q; if (!q) V.filtro = []; else V.filtro = V.filtro.includes(q) ? V.filtro.filter(x => x !== q) : [...V.filtro, q]; store.set('filtro', V.filtro); schedule(); },
   editev(b) { V.editEv = b.dataset.id; schedule(); requestAnimationFrame(() => { const f = $('#form-ev'); if (f) { f.scrollIntoView({ block: 'center', behavior: 'smooth' }); $('#ev-anio')?.focus({ preventScroll: true }); } }); },
   cancelev() { V.editEv = null; schedule(); },
-  advance(b) { if (!guard()) return; confirmClick(b, () => advanceYear(b.dataset.c)); },
-  delrow(b) { if (!guard()) return; confirmClick(b, () => { const [c, key] = b.dataset.id.split('|'); const y = latest(c); const r = S[c][y]?.filas?.[key];
+  campana(b) { if (!guard() || !esDueno) return; confirmClick(b, avanzarCampana); },
+  delrow(b) { if (!guard()) return; confirmClick(b, () => { const [c, key] = b.dataset.id.split('|'); const y = actual(); const r = S[c][y]?.filas?.[key];
     upd(`${c}/y${y}`, { filas: { [key]: null } }).then(() => log(`quitó ${r?.region || r?.especie || key} (${c === 'poblacion' ? 'población' : c}, año ${y})`)).catch(() => {}); }); },
   delmov(b) { delFrom(b, 'monedas', m => `borró el movimiento de ${fmt(m.cantidad)} monedas de ${String(m.metal).toLowerCase()} de ${m.quien}`); },
   delgem(b) { delFrom(b, 'gemas', g => `borró ${fmt(g.cantidad)} × ${g.tipo} del tesoro`); },
@@ -956,29 +980,52 @@ function setTab(k) {
   schedule(); window.scrollTo({ top: 0 });
 }
 
-async function advanceYear(c) {
-  const y = latest(c), d = S[c][y]; if (!d) return; const ny = y + 1; const ref = db.doc(`${c}/y${ny}`);
+const r6 = v => Math.round(v * 1e6) / 1e6;
+function finMina(d) { const m = calcMina(d); const ini = {}; for (const x of MINERALES) ini[x.k] = r6(m.min[x.k].fin); return ini; }
+// Builds year ny of a module from the closing state of the previous year d.
+function siguiente(c, d, ny) {
+  if (c === 'mina') {
+    const zero = {}; for (const x of MINERALES) zero[x.k] = 0;
+    return { anio: ny, trabajadores: { ...d.trabajadores }, pocosTrabajadores: !!d.pocosTrabajadores, inicial: finMina(d), anadir: zero, gastos: { ...zero } };
+  }
+  const f = {};
+  for (const [k, r] of filas(d)) {
+    if (c === 'poblacion') f[k] = { ...r, poblacion: calcPob(r).fin, bajas: 0, desplazamientos: 0 };
+    else if (c === 'ganado') f[k] = { ...r, poblacion: r.animales || 0, anadidas: 0, sacrificadas: 0 };
+    else f[k] = { ...r };
+  }
+  return { anio: ny, filas: f };
+}
+// Moves the whole campaign one year forward. Planned years that already exist (e.g. the mine)
+// become the present and keep their plans; the mine's opening stock is refreshed from the year
+// just closed, in case it was edited. Modules without a plan get their next year generated.
+async function avanzarCampana() {
+  const a = actual(), n = a + 1, ref = db.doc('campana/estado');
   try {
-    let next;
-    if (c === 'mina') {
-      const m = calcMina(d); const ini = {}, zero = {}; for (const x of MINERALES) { ini[x.k] = Math.round(m.min[x.k].fin * 1e6) / 1e6; zero[x.k] = 0; }
-      next = { anio: ny, trabajadores: { ...d.trabajadores }, pocosTrabajadores: !!d.pocosTrabajadores, inicial: ini, anadir: zero, gastos: { ...zero } };
-    } else {
-      const f = {};
-      for (const [k, r] of filas(d)) {
-        if (c === 'poblacion') f[k] = { ...r, poblacion: calcPob(r).fin, bajas: 0, desplazamientos: 0 };
-        else if (c === 'ganado') f[k] = { ...r, poblacion: r.animales || 0, anadidas: 0, sacrificadas: 0 };
-        else f[k] = { ...r };
-      }
-      next = { anio: ny, filas: f };
+    const ok = await db.runTransaction(async tx => {
+      const s = await tx.get(ref); const cur = s.exists && s.data().anio != null ? s.data().anio : a;
+      if (cur !== a) return false; tx.set(ref, { anio: n }, { merge: true }); return true;
+    });
+    if (!ok) { toast('Otra persona acaba de cambiar el año de la campaña.'); return; }
+    for (const c of ['poblacion', 'ganado', 'tierras', 'mina']) {
+      const prev = S[c][a]; if (!prev) continue;
+      if (S[c][n]) { if (c === 'mina') await upd(`mina/y${n}`, { inicial: finMina(prev) }); continue; }
+      const nref = db.doc(`${c}/y${n}`), data = siguiente(c, prev, n);
+      await db.runTransaction(async tx => { const s = await tx.get(nref); if (!s.exists) tx.set(nref, data); });
     }
-    // transaction: only one person can open the next year, even if two click at once
-    const creado = await db.runTransaction(async tx => { const snap = await tx.get(ref); if (snap.exists) return false; tx.set(ref, next); return true; });
-    if (!creado) { toast(`El año ${ny} ya está abierto.`); return; }
-    V.year[c] = ny;
-    log(`cerró el año ${y} y abrió el ${ny} en ${{ poblacion: 'población', ganado: 'ganado', tierras: 'tierras', mina: 'la mina' }[c]}`);
-    toast(`Año ${ny} abierto.`);
+    V.year = {};
+    log(`pasó la campaña del año ${a} al año ${n}`); toast(`La campaña está ahora en el año ${n}.`);
   } catch (e) { toast(errMsg(e)); }
+}
+function campanaPanel() {
+  const a = actual();
+  const planes = [...years('mina').filter(esPlan), ...S.cronica.filter(e => esPlan(e.anio)).map(e => e.anioFin || e.anio)];
+  const hasta = planes.length ? Math.max(...planes) : null;
+  return `<section class="panel"><h3>Campaña</h3>
+    <p class="ui" style="margin:0">Estáis jugando el <b>año ${a}</b>.${hasta ? ` Hay planes ya calculados hasta el año ${hasta}; se activan solos al llegar a cada año.` : ''}</p>
+    ${esDueno ? `<button class="btn seal" style="margin-top:12px" data-act="campana" data-needs-write>Pasar al año ${a + 1}</button>
+      <p class="ui muted" style="font-size:12px;margin:8px 0 0">Cierra el año ${a} y abre el ${a + 1} en población, ganado, tierras y mina. Pulsa dos veces para confirmar.</p>` : ''}
+  </section>`;
 }
 
 /* ---------- people ---------- */
@@ -1038,6 +1085,7 @@ function arrancar() {
   subList('registro', db.collection('registro').orderBy('ts', 'desc').limit(40));
   unsubs.push(db.collection('personas').onSnapshot(snap => {
     snap.docs.forEach(d => { const p = d.data(); NAMES[d.id] = { name: p.nombre || '', avatarUrl: p.foto || '' }; }); renderPeers(); schedule(); }, () => {}));
+  unsubs.push(db.doc('campana/estado').onSnapshot(s => { const v = s.exists ? s.data().anio : null; S.campana = typeof v === 'number' ? v : null; schedule(); }, () => {}));
   unsubs.push(db.collection('presencia').onSnapshot(snap => { presencia = snap.docs.map(d => ({ id: d.id, ...d.data() })); buildPeers(); }, () => {}));
   if (esDueno) unsubs.push(db.doc('config/acceso').onSnapshot(s => { acceso = s.exists ? s.data() : null; schedule(); }, () => {}));
   db.doc('personas/' + myId).set({ nombre: me.displayName || me.email.split('@')[0], foto: me.photoURL || '' }, { merge: true }).catch(() => {});
@@ -1047,7 +1095,7 @@ function parar() {
   unsubs.forEach(u => { try { u(); } catch {} }); unsubs = [];
   for (const k of ['poblacion', 'ganado', 'tierras', 'mina']) S[k] = {};
   for (const k of ['monedas', 'gemas', 'objetos', 'cronica', 'objetivos', 'registro']) S[k] = [];
-  S.ready = {}; presencia = []; peerList = []; connected = false;
+  S.ready = {}; S.campana = null; presencia = []; peerList = []; connected = false;
 }
 async function comprobarAcceso() {
   const email = (me.email || '').toLowerCase();
