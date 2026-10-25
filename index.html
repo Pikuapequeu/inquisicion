@@ -198,6 +198,12 @@ details.adder[open] > summary::before { content: "− " }
 /* Dominio: map canvas + side panel */
 .dom { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; align-items: start }
 @media (max-width: 980px) { .dom { grid-template-columns: minmax(0, 1fr) } }
+.subtabs { display: flex; gap: 0; border-bottom: 1px solid var(--line); overflow-x: auto }
+.subtabs:empty { display: none }
+.subtab { font-family: var(--f-display); font-size: 24px; line-height: 1.1; color: var(--muted); background: none; border: 0; border-bottom: 3px solid transparent; padding: 8px 20px 8px 2px; margin-right: 18px; cursor: pointer; text-align: left; white-space: nowrap }
+.subtab small { display: block; font-family: var(--f-ui); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-top: 2px }
+.subtab:hover { color: var(--ink) }
+.subtab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--blood) }
 .dom-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px }
 .dom-bar .sep { width: 1px; height: 24px; background: var(--line); margin: 0 4px }
 .tool[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink) }
@@ -1231,7 +1237,8 @@ async function cargarImagen(m) {
 
 function domShell() {
   return `<div class="sheet" id="dom-root">
-    <div class="head"><div><h2>Dominio</h2><p>Pinta los hexágonos que controla la Orden. Elige un color de la leyenda y haz clic o arrastra sobre el mapa; todos lo veis al momento.</p></div><div class="years" id="dom-mapas"></div></div>
+    <div class="head" style="margin-bottom:0"><div><h2>Dominio</h2><p>Pinta los hexágonos que controla la Orden. Elige un color de la leyenda y haz clic o arrastra sobre el mapa; todos lo veis al momento.</p></div></div>
+    <div class="subtabs" id="dom-mapas" role="tablist" aria-label="Mapas"></div>
     <div class="dom">
       <div style="min-width:0">
         <div class="dom-bar" id="dom-bar"></div>
@@ -1244,7 +1251,7 @@ function domShell() {
 }
 function domUpdate() {
   const m = mapaSel(); const ms = mapas();
-  $('#dom-mapas').innerHTML = ms.length > 1 ? '<span>Mapa</span>' + ms.map(x => `<button class="chip" data-act="mapa" data-id="${esc(x.id)}" aria-pressed="${m && x.id === m.id}">${esc(x.nombre)}</button>`).join('') : '';
+  $('#dom-mapas').innerHTML = ms.map(x => `<button class="subtab" role="tab" data-act="mapa" data-id="${esc(x.id)}" aria-selected="${!!(m && x.id === m.id)}">${esc(x.nombre)}${x.escala ? `<small>${esc(x.escala)}</small>` : ''}</button>`).join('');
   const t = (k, n) => `<button class="btn tool" data-act="tool" data-t="${k}" aria-pressed="${M.tool === k}">${n}</button>`;
   $('#dom-bar').innerHTML = m ? `${t('mover', 'Mover')}${t('pintar', 'Pintar')}${t('borrar', 'Borrar')}${t('info', 'Notas')}<span class="sep"></span>
     <button class="btn ghost" data-act="zoom" data-z="1.4" aria-label="Acercar">+</button><button class="btn ghost" data-act="zoom" data-z="0.714" aria-label="Alejar">−</button>
