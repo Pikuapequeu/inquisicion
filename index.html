@@ -266,6 +266,12 @@ const CULTIVOS = {
 const CAZA_LB_MILLA = 2.56*20 + 3.84*150 + 3.84*150 + 6.4*10 + 6.4*150 + 1.28*100 + 1.28*300;
 const CAZA_PIEZAS_MILLA = 2.56 + 3.84 + 3.84 + 6.4 + 6.4 + 1.28 + 1.28;
 const PESCA_LB_MILLA = 4350;
+const LB_POR_PIEZA = CAZA_LB_MILLA / CAZA_PIEZAS_MILLA;
+// Jungle hunting in Chult: same fauna table as Barovia, scaled by abundance (the mine's rarity
+// scale: Normal ×1 … Muy abundante ×5) and by an optional expertise bonus for goblins.
+// Editable in the page; stored in reglas/jungla.
+const ABUNDANCIA = [['Raro', 0.2], ['Normal', 1], ['Abundante', 2], ['Muy abundante', 5]];
+const JUNGLA_DEF = { regiones: ['Chult', 'Hrakhamar'], millasPorCasilla: 10, abundancia: 5, bonoGoblins: 0, casillas: {} };
 const MINERALES = [
   { k: 'diamantes',  n: 'Diamantes',  rareza: 'Muy abundante', base: 5000 },
   { k: 'rubies',     n: 'Rubíes',     rareza: 'Abundante',     base: 2000 },
@@ -347,10 +353,25 @@ function calcPob(f) {
   fin = Math.max(0, fin);
   return { crec, fin, ejercito: fin * (f.indEjercito || 0), diario: fin * (f.lbDiarias || 0) };
 }
-function totPob(d) {
+function totPob(d, excluir) {
   const t = { fin: 0, ejercito: 0, diario: 0, inicio: 0 };
-  for (const [, f] of filas(d)) { const c = calcPob(f); t.fin += c.fin; t.ejercito += c.ejercito; t.diario += c.diario; t.inicio += f.poblacion || 0; }
+  for (const [, f] of filas(d)) { if (excluir && excluir.includes(f.region)) continue; const c = calcPob(f); t.fin += c.fin; t.ejercito += c.ejercito; t.diario += c.diario; t.inicio += f.poblacion || 0; }
   t.anual = t.diario * 365; return t;
+}
+const reglasJungla = () => ({ ...JUNGLA_DEF, ...(S.jungla || {}), casillas: { ...((S.jungla || {}).casillas || {}) } });
+// One row per people living in the jungle: what they eat, and how much jungle they hunt for it.
+function calcJungla(pd) {
+  const R = reglasJungla(); const out = [];
+  for (const [key, f] of filas(pd)) {
+    if (!R.regiones.includes(f.region)) continue;
+    const c = calcPob(f), anual = c.diario * 365;
+    const mult = (R.abundancia || 0) * (1 + (f.raza === 'Goblin' ? (R.bonoGoblins || 0) / 100 : 0));
+    const lbCasilla = (R.millasPorCasilla || 0) * CAZA_LB_MILLA * mult, piezasCasilla = (R.millasPorCasilla || 0) * CAZA_PIEZAS_MILLA * mult;
+    const asignadas = R.casillas[key];
+    out.push({ key, f, fin: c.fin, anual, piezas: anual / LB_POR_PIEZA, lbCasilla, piezasCasilla,
+      necesitan: lbCasilla > 0 ? anual / lbCasilla : null, asignadas, saldo: asignadas != null ? asignadas * lbCasilla - anual : null });
+  }
+  return out;
 }
 function cultivo(k, millas, tierra) {
   const c = CULTIVOS[k]; if (!millas || !tierra || tierra === 'No plantado') return 0;
@@ -521,6 +542,7 @@ VIEWS.resumen = () => {
   const td = atOrBefore('tierras', yp), gd = atOrBefore('ganado', yp);
   const tTi = td ? totTierras(td) : { caza: 0, pesca: 0, cultivos: 0, total: 0 }, tGa = gd ? totGanado(gd) : { comida: 0, consumo: 0 };
   const prod = tTi.total + tGa.comida;
+  const RJ = reglasJungla(); const tpB = pd ? totPob(pd, RJ.regiones) : null; const jun = pd ? calcJungla(pd) : [];
   const regiones = {}; if (pd) for (const [, f] of filas(pd)) { const c = calcPob(f); const r = regiones[f.region] = regiones[f.region] || { fin: 0, max: 0, ej: 0 }; r.fin += c.fin; r.max += f.maximo || 0; r.ej += c.ejercito; }
   const regRows = Object.entries(regiones).sort((a, b) => b[1].fin - a[1].fin);
   const maxReg = Math.max(1, ...regRows.map(([, r]) => r.max || r.fin));
@@ -530,9 +552,9 @@ VIEWS.resumen = () => {
     { label: 'Ganado', v: tGa.comida, val: big(tGa.comida) + ' lb' },
     { label: 'Caza', v: tTi.caza, val: big(tTi.caza) + ' lb' },
     { label: 'Pesca', v: tTi.pesca, val: big(tTi.pesca) + ' lb' },
-    { label: '<b>Consumo humano</b>', title: 'Consumo humano', v: tp ? tp.anual : 0, val: big(tp ? tp.anual : 0) + ' lb', cls: 'cons' },
+    { label: '<b>Consumo de la población</b>', title: 'Consumo de la población de Barovia', v: tpB ? tpB.anual : 0, val: big(tpB ? tpB.anual : 0) + ' lb', cls: 'cons' },
   ];
-  const ratio = tp && tp.anual ? prod / tp.anual : null;
+  const ratio = tpB && tpB.anual ? prod / tpB.anual : null;
   return `
   <div class="sheet">
     <div class="head"><div><h2>Estado del dominio · año ${actual()}</h2><p>Lo esencial de la Orden de un vistazo. Todo se recalcula en cuanto alguien cambia un dato en cualquier pestaña. Lo planificado para años futuros no cuenta en estos totales.</p></div></div>
@@ -550,11 +572,20 @@ VIEWS.resumen = () => {
             val: `${fmt(r.fin, 0)} <span class="muted">/ ${r.max ? fmt(r.max, 0) : '∞'}</span>${r.max && r.fin >= r.max * 0.95 ? ' <span class="flag">al límite</span>' : ''}` })), maxReg) : '<p class="empty">Aún no hay censo cargado.</p>'}
           <div class="legend"><span><i style="background:var(--gold)"></i>ciudadanos sobre el máximo de la región</span><span><i style="background:var(--warn)"></i>95 % o más de capacidad</span></div>
         </section>
-        <section class="panel"><h3>Balance alimentario · año ${yp ?? '—'} (lb al año)</h3>
+        <section class="panel"><h3>Balance alimentario de Barovia · año ${yp ?? '—'} (lb al año)</h3>
           ${hbars(foodRows, Math.max(1, ...foodRows.map(r => r.v)))}
           <p class="ui" style="margin:12px 0 0">${ratio != null ? `Se produce <b>${fmt(ratio, 1)} veces</b> lo que come la población.` : ''}
-            <span class="muted">El ganado consume además ${big(tGa.consumo)} lb de forraje al año.</span></p>
+            <span class="muted">El ganado consume además ${big(tGa.consumo)} lb de forraje al año. ${esc(RJ.regiones.join(' y '))} comen de su caza y van aparte.</span></p>
         </section>
+        ${jun.length ? `<section class="panel"><h3>Caza en la jungla de Chult · año ${yp}</h3>
+          <div class="tbl" style="border:0"><table>
+            <thead><tr><th>Pueblo</th><th class="r">Comen al año</th><th class="r">Piezas al año</th><th class="r">Casillas de jungla</th></tr></thead>
+            <tbody>${jun.map(j => `<tr><td class="name">${esc(j.f.region)}<small>${esc(j.f.raza)} · ${fmt(j.fin, 0)} ${j.fin === 1 ? 'persona' : 'personas'}</small></td>
+              <td class="r">${big(j.anual)} lb</td><td class="r">${fmt(j.piezas, 0)}</td>
+              <td class="r">${j.necesitan != null ? fmt(j.necesitan, 2) : '—'}${j.saldo != null && j.saldo < 0 ? ' <span class="flag" style="color:var(--crit)">faltan presas</span>' : ''}</td></tr>`).join('')}</tbody>
+          </table></div>
+          <p class="ui muted" style="font-size:13px;margin:8px 0 0">Casillas que ocupa su caza. Una casilla de jungla da ${big(RJ.millasPorCasilla * CAZA_LB_MILLA * RJ.abundancia)} lb al año. Se ajusta en la pestaña Tierras.</p>
+        </section>` : ''}
         <section class="panel"><h3>Ciudadanos al cierre de cada año</h3>${vchart(hist, 'ciudadanos')}</section>
       </div>
       <aside class="sheet">
@@ -677,8 +708,37 @@ VIEWS.tierras = () => {
       <form class="add" data-form="tie"><label>Región<input name="region" required maxlength="60"></label>
         <label>Millas de caza<input name="caza" type="number" step="any" value="0"></label><label>Millas de pesca<input name="pesca" type="number" step="any" value="0"></label>
         <button class="btn" type="submit">Añadir</button></form></details>` : ''}
+    ${junglaHtml(y, edit)}
   </div>`;
 };
+
+function junglaHtml(y, edit) {
+  const pd = S.poblacion[y]; if (!pd) return '';
+  const R = reglasJungla(), jun = calcJungla(pd);
+  const w = edit && canWrite && db ? '' : 'disabled';
+  const base = R.millasPorCasilla * CAZA_LB_MILLA * R.abundancia;
+  return `<section class="sheet" style="gap:14px">
+    <div class="head" style="margin:0"><div><h2>Caza en la jungla de Chult</h2><p>Goblins y enanos viven en Chult y comen solo de lo que cazan. Se usa la misma fauna que en Barovia, multiplicada por la abundancia de la jungla.</p></div></div>
+    <div class="panel"><div style="display:flex;flex-wrap:wrap;gap:12px 28px;align-items:end" class="ui">
+      <label class="ui muted" style="font-size:13px;display:grid;gap:3px">Millas de caza por casilla
+        <input class="num" id="i-jun-millas" data-bind="jun" data-a="millasPorCasilla" value="${esc(R.millasPorCasilla)}" inputmode="decimal" ${w}></label>
+      <label class="ui muted" style="font-size:13px;display:grid;gap:3px">Abundancia de la fauna
+        <select class="inl" id="i-jun-abund" data-bind="jun" data-a="abundancia" ${w}>${ABUNDANCIA.map(([n, v]) => `<option value="${v}" ${+R.abundancia === v ? 'selected' : ''}>${n} (×${fmt(v, 1)})</option>`).join('')}</select></label>
+      <label class="ui muted" style="font-size:13px;display:grid;gap:3px">Pericia de los goblins (%)
+        <input class="num" id="i-jun-bono" data-bind="jun" data-a="bonoGoblins" value="${esc(R.bonoGoblins)}" inputmode="decimal" ${w}></label>
+      <div><div class="ui muted" style="font-size:13px">Una casilla de jungla da al año</div><div class="ui" style="font-size:20px;font-weight:700">${big(base)} lb · ${fmt(R.millasPorCasilla * CAZA_PIEZAS_MILLA * R.abundancia, 0)} piezas</div></div>
+    </div></div>
+    ${jun.length ? `<div class="tbl"><table>
+      <thead><tr><th>Pueblo</th><th class="r">Ciudadanos</th><th class="r">lb/día pers.</th><th class="r">Comen al año</th><th class="r">Piezas cazadas al año</th><th class="r">lb por casilla</th><th class="r">Casillas que ocupan</th><th class="r">Casillas disponibles</th><th>Estado</th></tr></thead>
+      <tbody>${jun.map(j => `<tr><td class="name">${esc(j.f.region)}<small>${esc(j.f.raza)} · ${esc(j.f.subraza)}</small></td>
+        <td class="r">${fmt(j.fin, 0)}</td><td class="r">${fmt(j.f.lbDiarias, 2)}</td><td class="calc">${big(j.anual)} lb</td><td class="calc">${fmt(j.piezas, 0)}</td>
+        <td class="r">${big(j.lbCasilla)}</td><td class="calc">${j.necesitan != null ? fmt(j.necesitan, 2) : '—'}</td>
+        <td class="r"><input class="num" id="i-juncas-${esc(j.key)}" data-bind="juncas" data-a="${esc(j.key)}" value="${j.asignadas == null ? '' : esc(j.asignadas)}" placeholder="opcional" ${w}></td>
+        <td>${j.saldo == null ? '<span class="muted ui" style="font-size:13px">—</span>' : j.saldo >= 0 ? `<span class="flag" style="color:var(--ok)">Sobran ${big(j.saldo)} lb</span>` : `<span class="flag" style="color:var(--crit)">Faltan ${big(-j.saldo)} lb</span>`}</td></tr>`).join('')}</tbody>
+    </table></div>` : `<p class="empty">No hay población en ${esc(R.regiones.join(' ni '))} este año.</p>`}
+    <p class="ui muted" style="font-size:13px;margin:0">"Casillas que ocupan" es la jungla que necesitan cazar para comer lo que comen. Si apuntáis las casillas que tienen disponibles, la web os dice si les sobra o les falta caza. Las lb por persona se cambian en Población.</p>
+  </section>`;
+}
 
 VIEWS.mina = () => {
   const y = selYear('mina'); const d = S.mina[y]; const edit = y === actual();
@@ -863,6 +923,19 @@ const BIND = {
   minpoc(el) { if (!guard()) return; const y = actual(); if (!S.mina[y]) return; upd(`mina/y${y}`, { pocosTrabajadores: el.checked }).then(() => log(`${el.checked ? 'activó' : 'quitó'} la penalización por pocos trabajadores en la mina`)).catch(() => {}); },
   goal(el) { if (!guard()) return; const o = S.objetivos.find(x => x.id === el.dataset.a); if (!o) return;
     upd(`objetivos/${o.id}`, { conseguido: el.checked }).then(() => log(`${el.checked ? 'marcó como cumplido' : 'reabrió'} el objetivo «${o.texto}»`)).catch(() => {}); },
+  jun(el) {
+    if (!guard()) return; const k = el.dataset.a, v = num(el.value), R = reglasJungla();
+    if (v == null || v < 0) { toast('Escribe un número igual o mayor que 0.'); el.value = R[k]; return; } if (R[k] === v) return;
+    const n = { millasPorCasilla: 'las millas de caza por casilla de jungla', abundancia: 'la abundancia de la jungla', bonoGoblins: 'la pericia de caza de los goblins (%)' }[k] || k;
+    upd('reglas/jungla', { [k]: v }).then(() => log(`cambió ${n}: ${fmt(R[k])} → ${fmt(v)}`)).catch(() => {});
+  },
+  juncas(el) {
+    if (!guard()) return; const key = el.dataset.a, raw = el.value.trim(), v = raw === '' ? null : num(raw), R = reglasJungla();
+    if (raw !== '' && (v == null || v < 0)) { toast('Escribe un número de casillas, o déjalo vacío.'); return; }
+    if ((R.casillas[key] ?? null) === v) return;
+    const f = S.poblacion[actual()]?.filas?.[key]; const quien = f ? `${f.raza.toLowerCase()}s de ${f.region}` : key;
+    upd('reglas/jungla', { casillas: { [key]: v } }).then(() => log(v == null ? `quitó el límite de casillas de caza de los ${quien}` : `puso ${fmt(v)} casillas de jungla para la caza de los ${quien}`)).catch(() => {});
+  },
   gem: listBinder('gemas', 'gema', o => o.tipo),
   obj: listBinder('objetos', 'objeto', o => o.nombre),
 };
@@ -1085,6 +1158,7 @@ function arrancar() {
   subList('registro', db.collection('registro').orderBy('ts', 'desc').limit(40));
   unsubs.push(db.collection('personas').onSnapshot(snap => {
     snap.docs.forEach(d => { const p = d.data(); NAMES[d.id] = { name: p.nombre || '', avatarUrl: p.foto || '' }; }); renderPeers(); schedule(); }, () => {}));
+  unsubs.push(db.doc('reglas/jungla').onSnapshot(s => { S.jungla = s.exists ? s.data() : null; schedule(); }, () => {}));
   unsubs.push(db.doc('campana/estado').onSnapshot(s => { const v = s.exists ? s.data().anio : null; S.campana = typeof v === 'number' ? v : null; schedule(); }, () => {}));
   unsubs.push(db.collection('presencia').onSnapshot(snap => { presencia = snap.docs.map(d => ({ id: d.id, ...d.data() })); buildPeers(); }, () => {}));
   if (esDueno) unsubs.push(db.doc('config/acceso').onSnapshot(s => { acceso = s.exists ? s.data() : null; schedule(); }, () => {}));
@@ -1095,7 +1169,7 @@ function parar() {
   unsubs.forEach(u => { try { u(); } catch {} }); unsubs = [];
   for (const k of ['poblacion', 'ganado', 'tierras', 'mina']) S[k] = {};
   for (const k of ['monedas', 'gemas', 'objetos', 'cronica', 'objetivos', 'registro']) S[k] = [];
-  S.ready = {}; S.campana = null; presencia = []; peerList = []; connected = false;
+  S.ready = {}; S.campana = null; S.jungla = null; presencia = []; peerList = []; connected = false;
 }
 async function comprobarAcceso() {
   const email = (me.email || '').toLowerCase();
