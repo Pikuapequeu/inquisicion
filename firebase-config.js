@@ -1,15 +1,10 @@
-// Pega aquí el bloque firebaseConfig de tu proyecto
-// (Firebase → Configuración del proyecto → Tus apps → app web).
-// Estos datos no son secretos: lo que protege el archivo son las reglas de Firestore.
+// Configuración pública del proyecto de Firebase (no es secreta:
+// lo que protege los datos son las reglas de Firestore).
 window.FIREBASE_CONFIG = {
-  apiKey: "PEGA_AQUI_TU_API_KEY",
-  authDomain: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: ""
+  apiKey: "AIzaSyD63c9qbpJNiQRtSQDO765d5fCWJHo-fg0",
+  authDomain: "inquisicion-barovia-4643.firebaseapp.com",
+  projectId: "inquisicion-barovia-4643",
+  storageBucket: "inquisicion-barovia-4643.firebasestorage.app",
+  messagingSenderId: "1072158666357",
+  appId: "1:1072158666357:web:d150f6baa6c992ccecd23c"
 };
-
-// Tu correo de Google: el dueño del archivo. Solo esa cuenta puede gestionar
-// la lista de acceso e importar los datos del Excel.
-window.DUENO = "tu-correo@gmail.com";

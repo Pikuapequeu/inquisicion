@@ -314,7 +314,6 @@ const V = { tab: 'resumen', year: {}, filtro: store.get('filtro', []), editEv: n
 let db = null, user = null, room = null, myId = null, canWrite = true, connected = false;
 let auth = null, me = null, authReady = false, esDueno = false, miembro = null, acceso = null;
 const CFG = window.FIREBASE_CONFIG || null;
-const DUENO = String(window.DUENO || '').trim().toLowerCase();
 const NAMES = {};
 const years = c => Object.keys(S[c]).map(Number).sort((a, b) => a - b);
 const latest = c => { const y = years(c); return y.length ? y[y.length - 1] : null; };
@@ -881,7 +880,7 @@ const FORMS = {
     return db.collection('objetivos').add(o).then(() => log(`propuso un objetivo nuevo: «${o.texto}»`)); },
   acceso(fd) {
     const list = [...new Set(String(fd.get('emails') || '').split(/[\s,;]+/).map(s => s.trim().toLowerCase()).filter(s => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s)))];
-    if (DUENO && !list.includes(DUENO)) list.unshift(DUENO);
+    const mio = (me.email || '').toLowerCase(); if (mio && !list.includes(mio)) list.unshift(mio);
     return db.doc('config/acceso').set({ editores: list }).then(() => log(`actualizó la lista de acceso (${list.length} ${list.length === 1 ? 'persona' : 'personas'})`));
   },
   ev(fd) {
@@ -1052,11 +1051,12 @@ function parar() {
 }
 async function comprobarAcceso() {
   const email = (me.email || '').toLowerCase();
-  esDueno = !!DUENO && email === DUENO;
+  // the security rules only let the owner read config/dueno, so a successful read means "owner"
+  try { await db.doc('config/dueno').get(); esDueno = true; } catch { esDueno = false; }
   try {
     const s = await db.doc('config/acceso').get();
     acceso = s.exists ? s.data() : null;
-    if (esDueno && !acceso) { acceso = { editores: [DUENO] }; await db.doc('config/acceso').set(acceso); }
+    if (esDueno && !acceso) { acceso = { editores: [email] }; await db.doc('config/acceso').set(acceso); }
     miembro = esDueno || !!(acceso && (acceso.editores || []).includes(email));
   } catch (e) { miembro = esDueno; if (!esDueno && e.code !== 'permission-denied') toast(errMsg(e)); }
 }
