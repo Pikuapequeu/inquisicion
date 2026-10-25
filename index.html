@@ -195,6 +195,26 @@ details.adder[open] > summary::before { content: "− " }
 .legend { display: flex; flex-wrap: wrap; gap: 14px; font-family: var(--f-ui); font-size: 12px; color: var(--muted); margin-top: 10px }
 .legend i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: -1px }
 @media (prefers-reduced-motion: no-preference) { .fill, .vchart .bar, .progress i { transition: width .4s ease, height .4s ease } }
+/* Dominio: map canvas + side panel */
+.dom { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; align-items: start }
+@media (max-width: 980px) { .dom { grid-template-columns: minmax(0, 1fr) } }
+.dom-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px }
+.dom-bar .sep { width: 1px; height: 24px; background: var(--line); margin: 0 4px }
+.tool[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink) }
+.map-wrap { position: relative; border: 1px solid var(--line); background: var(--panel-2); height: min(78vh, 900px); min-height: 380px; overflow: hidden; touch-action: none; user-select: none }
+.map-wrap canvas { display: block; width: 100%; height: 100%; cursor: grab }
+.map-wrap.paint canvas { cursor: crosshair }
+.map-wrap.info canvas { cursor: help }
+.map-wrap.dragging canvas { cursor: grabbing }
+.map-msg { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--f-ui); color: var(--muted); pointer-events: none; text-align: center; padding: 16px }
+.map-tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--bg); font-family: var(--f-ui); font-size: 12px; padding: 3px 8px; border-radius: 3px; white-space: nowrap; z-index: 2 }
+.ley { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px }
+.ley li { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 5px 6px; border: 1px solid transparent; border-radius: 4px; cursor: pointer }
+.ley li[aria-selected="true"] { border-color: var(--ink); background: var(--panel-2) }
+.ley input[type="color"] { width: 26px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: none; cursor: pointer }
+.ley .cnt { font-family: var(--f-ui); font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px }
+.ley input.txt { min-width: 0 }
+.kbd { font-family: var(--f-ui); font-size: 12px; color: var(--muted); line-height: 1.6 }
 /* planned (future) years: italic chips, outlined bars, muted blocks */
 .chip.plan { font-style: italic; border-style: dashed; color: var(--muted) }
 .chip.plan[aria-pressed="true"] { color: var(--bg) }
@@ -285,7 +305,7 @@ const MINERALES = [
 ];
 const EFICACIA = { goblins: 0.04, humanos: 0.1, enanos: 0.2 };
 const TABS = [
-  ['resumen','Resumen'],['poblacion','Población'],['ganado','Ganado'],['tierras','Tierras'],
+  ['resumen','Resumen'],['dominio','Dominio'],['poblacion','Población'],['ganado','Ganado'],['tierras','Tierras'],
   ['mina','Mina'],['tesoro','Tesoro'],['cronica','Crónica'],['objetivos','Objetivos'],
 ];
 
@@ -324,7 +344,8 @@ function hace(ts) {
 }
 
 /* ---------- state ---------- */
-const S = { poblacion: {}, ganado: {}, tierras: {}, mina: {}, monedas: [], gemas: [], objetos: [], cronica: [], objetivos: [], registro: [], ready: {} };
+const S = { poblacion: {}, ganado: {}, tierras: {}, mina: {}, monedas: [], gemas: [], objetos: [], cronica: [], objetivos: [], registro: [], ready: {},
+  mapas: [], dominio: {}, leyenda: null };
 const V = { tab: 'resumen', year: {}, filtro: store.get('filtro', []), editEv: null };
 let db = null, user = null, room = null, myId = null, canWrite = true, connected = false;
 let auth = null, me = null, authReady = false, esDueno = false, miembro = null, acceso = null;
@@ -452,7 +473,11 @@ function render() {
   }
   const openDetails = [...document.querySelectorAll('#view details[id]')].filter(d => d.open).map(d => d.id);
   renderHeader();
-  $('#view').innerHTML = gateView() || (VIEWS[V.tab] || VIEWS.resumen)();
+  const gate = gateView();
+  // the map canvas must survive live updates (someone painting mid-drag), so the Dominio tab
+  // keeps its shell and only refreshes the side panels and redraws
+  if (!gate && V.tab === 'dominio') { if (!$('#dom-root')) $('#view').innerHTML = domShell(); domUpdate(); }
+  else $('#view').innerHTML = gate || (VIEWS[V.tab] || VIEWS.resumen)();
   openDetails.forEach(id => { const d = document.getElementById(id); if (d) d.open = true; });
   if (keep) {
     const el = document.getElementById(keep.id);
@@ -923,6 +948,12 @@ const BIND = {
   minpoc(el) { if (!guard()) return; const y = actual(); if (!S.mina[y]) return; upd(`mina/y${y}`, { pocosTrabajadores: el.checked }).then(() => log(`${el.checked ? 'activó' : 'quitó'} la penalización por pocos trabajadores en la mina`)).catch(() => {}); },
   goal(el) { if (!guard()) return; const o = S.objetivos.find(x => x.id === el.dataset.a); if (!o) return;
     upd(`objetivos/${o.id}`, { conseguido: el.checked }).then(() => log(`${el.checked ? 'marcó como cumplido' : 'reabrió'} el objetivo «${o.texto}»`)).catch(() => {}); },
+  ley(el) {
+    if (!guard()) return; const bs = bandos().map(b => ({ ...b })), b = bs.find(x => x.id === el.dataset.a); if (!b) return;
+    const f = el.dataset.b, v = f === 'color' ? el.value : el.value.trim().slice(0, 40); if (!v || b[f] === v) return;
+    const antes = b[f]; b[f] = v;
+    setDoc('reglas/leyenda', { bandos: bs }).then(() => log(f === 'color' ? `cambió el color de «${b.nombre}» en la leyenda` : `renombró «${antes}» como «${v}» en la leyenda`)).catch(() => {});
+  },
   jun(el) {
     if (!guard()) return; const k = el.dataset.a, v = num(el.value), R = reglasJungla();
     if (v == null || v < 0) { toast('Escribe un número igual o mayor que 0.'); el.value = R[k]; return; } if (R[k] === v) return;
@@ -975,6 +1006,27 @@ const FORMS = {
     return db.collection('objetos').add(o).then(() => log(`añadió el objeto «${o.nombre}» al tesoro`)); },
   goal(fd) { const o = { texto: fd.get('texto').trim(), quien: fd.get('quien').trim(), conseguido: false, orden: maxOrden(S.objetivos) };
     return db.collection('objetivos').add(o).then(() => log(`propuso un objetivo nuevo: «${o.texto}»`)); },
+  nota(fd) {
+    const m = mapaSel(); if (!m || !M.info) return Promise.reject('skip'); const t = String(fd.get('nota') || '').trim().slice(0, 500), k = M.info;
+    const [c, r] = k.split('_');
+    return upd(`dominio/${m.id}`, { notas: { [k]: t || null } }).then(() => log(t ? `anotó en el hexágono ${c}, ${r} de ${m.nombre}: «${t.slice(0, 80)}»` : `borró la nota del hexágono ${c}, ${r} de ${m.nombre}`));
+  },
+  bando(fd) {
+    const nombre = String(fd.get('nombre') || '').trim(), color = String(fd.get('color') || '#888888'); const bs = bandos();
+    let id = slug(nombre); while (bs.some(b => b.id === id)) id += '-2';
+    return setDoc('reglas/leyenda', { bandos: [...bs, { id, nombre, color }] }).then(() => { M.bando = id; store.set('bando', id); log(`añadió el color «${nombre}» a la leyenda del dominio`); });
+  },
+  rejilla(fd) {
+    const m = mapaSel(); if (!m || !esDueno) return Promise.reject('skip'); const g = {};
+    for (const k of ['x0', 'y0', 'dx', 'dy']) { const v = num(fd.get(k)); if (v == null || ((k === 'dx' || k === 'dy') && v <= 0)) { toast('Revisa los números de la rejilla.'); return Promise.reject('skip'); } g[k] = v; }
+    g.impar = +fd.get('impar') === -1 ? -1 : 1;
+    return upd(`mapas/${m.id}`, { grid: g, escala: String(fd.get('escala') || '').trim().slice(0, 60) }).then(() => log(`ajustó la rejilla del mapa de ${m.nombre}`));
+  },
+  mapa(fd) {
+    if (!esDueno) return Promise.reject('skip'); const file = fd.get('img'), nombre = String(fd.get('nombre') || '').trim();
+    if (!file || !file.size) { toast('Elige una imagen.'); return Promise.reject('skip'); }
+    return subirMapa(nombre, file);
+  },
   acceso(fd) {
     const list = [...new Set(String(fd.get('emails') || '').split(/[\s,;]+/).map(s => s.trim().toLowerCase()).filter(s => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s)))];
     const mio = (me.email || '').toLowerCase(); if (mio && !list.includes(mio)) list.unshift(mio);
@@ -1007,7 +1059,7 @@ document.addEventListener('submit', e => {
   const btn = form.querySelector('[type=submit]'); if (btn) btn.disabled = true;
   Promise.resolve().then(() => h(new FormData(form))).then(() => {
     if (form.dataset.form !== 'ev' && form.dataset.form !== 'acceso') form.reset(); toast('Guardado.'); schedule();
-  }).catch(err => { if (err !== 'skip') toast(errMsg(err)); })
+  }).catch(err => { if (err !== 'skip') toast(err && err.code ? errMsg(err) : 'No se pudo completar. Revisa los datos e inténtalo de nuevo.'); })
     .finally(() => { if (btn) btn.disabled = false; });
 });
 
@@ -1025,6 +1077,21 @@ const ACTS = {
     else if (e && e.code !== 'auth/popup-closed-by-user') toast('No se pudo entrar con Google. Inténtalo de nuevo.'); }); },
   salir() { if (myId && db) db.doc('presencia/' + myId).set({ ts: 0 }, { merge: true }).catch(() => {}); auth.signOut(); },
   importar(b) { if (!esDueno) return; confirmClick(b, importar); },
+  tool(b) { M.tool = b.dataset.t; if (M.tool !== 'info') M.info = null; schedule(); },
+  zoom(b) { const m = mapaSel(), c = $('#mapa-cv'); if (m && c) zoomEn(m, +b.dataset.z, c.clientWidth / 2, c.clientHeight / 2); },
+  encajar() { const m = mapaSel(); if (m) { delete M.vistas[m.id]; draw(); } },
+  rejilla(b) { M.rejilla = b.checked; draw(); },
+  mapa(b) { M.sel = b.dataset.id; store.set('mapa', M.sel); M.info = null; M.hover = null; schedule(); },
+  bando(b) { M.bando = b.dataset.id; store.set('bando', M.bando); if (M.tool === 'mover' || M.tool === 'info') M.tool = 'pintar'; schedule(); },
+  cerrarinfo() { M.info = null; schedule(); },
+  delbando(b) { if (!guard()) return; const bs = bandos(), x = bs.find(z => z.id === b.dataset.id); if (!x) return;
+    confirmClick(b, () => setDoc('reglas/leyenda', { bandos: bs.filter(z => z.id !== x.id) }).then(() => log(`quitó el color «${x.nombre}» de la leyenda del dominio`)).catch(() => {})); },
+  delmapa(b) { if (!guard() || !esDueno) return; const m = mapas().find(x => x.id === b.dataset.id); if (!m) return;
+    confirmClick(b, async () => { try {
+      const tz = await db.collection('mapatrozos').where('mapa', '==', m.id).get(); const batch = db.batch();
+      tz.docs.forEach(d => batch.delete(d.ref)); batch.delete(db.doc(`mapas/${m.id}`)); batch.delete(db.doc(`dominio/${m.id}`)); await batch.commit();
+      delete M.img[m.id]; M.sel = null; log(`borró el mapa «${m.nombre}»`); toast('Mapa borrado.');
+    } catch (e) { toast(errMsg(e)); } }); },
   year(b) { V.year[b.dataset.c] = +b.dataset.y; schedule(); },
   filtro(b) { const q = b.dataset.q; if (!q) V.filtro = []; else V.filtro = V.filtro.includes(q) ? V.filtro.filter(x => x !== q) : [...V.filtro, q]; store.set('filtro', V.filtro); schedule(); },
   editev(b) { V.editEv = b.dataset.id; schedule(); requestAnimationFrame(() => { const f = $('#form-ev'); if (f) { f.scrollIntoView({ block: 'center', behavior: 'smooth' }); $('#ev-anio')?.focus({ preventScroll: true }); } }); },
@@ -1101,6 +1168,247 @@ function campanaPanel() {
   </section>`;
 }
 
+/* ---------- dominio: hex maps ---------- */
+// Maps live in `mapas/<id>` (name, size in original pixels, hex grid) with the image split
+// into base64 chunks in `mapatrozos` (Firestore docs max 1 MB). Painted hexes and notes live in
+// `dominio/<id>` as { celdas: {"c_r": bandoId}, notas: {"c_r": text} }. Flat-top hexes,
+// "odd-q" layout: column c centre x = x0 + c·dx; odd columns sit half a row lower.
+const BANDOS_DEF = [
+  { id: 'inquisicion', nombre: 'La Inquisición', color: '#b8323f' },
+  { id: 'aliados', nombre: 'Aliados', color: '#c9a45c' },
+  { id: 'caza', nombre: 'Coto de caza', color: '#4f9a4a' },
+  { id: 'explorado', nombre: 'Explorado', color: '#3f86c0' },
+  { id: 'disputa', nombre: 'En disputa', color: '#e0862b' },
+  { id: 'enemigo', nombre: 'Enemigo', color: '#7a55b0' },
+];
+const MAX_IMG = 3000, TROZO = 800000;
+const M = { sel: store.get('mapa', null), img: {}, cargando: {}, pend: {}, flushT: null, tool: 'mover', bando: store.get('bando', 'inquisicion'),
+  vistas: {}, hover: null, info: null, rejilla: false, trazo: null, ptrs: new Map(), pinch: null };
+const bandos = () => (S.leyenda && Array.isArray(S.leyenda.bandos) && S.leyenda.bandos.length) ? S.leyenda.bandos : BANDOS_DEF;
+const mapas = () => [...(S.mapas || [])].sort((a, b) => (a.orden || 0) - (b.orden || 0) || String(a.nombre).localeCompare(b.nombre));
+const mapaSel = () => { const ms = mapas(); return ms.find(m => m.id === M.sel) || ms[0] || null; };
+const impar = c => ((c % 2) + 2) % 2 === 1;
+function centro(g, c, r) { return [g.x0 + c * g.dx, g.y0 + r * g.dy + (impar(c) ? (g.impar === -1 ? -g.dy / 2 : g.dy / 2) : 0)]; }
+function hexPath(ctx, g, c, r) {
+  const [cx, cy] = centro(g, c, r), rx = g.dx / 1.5, ry = g.dy / 2;
+  ctx.moveTo(cx + rx, cy); ctx.lineTo(cx + rx / 2, cy + ry); ctx.lineTo(cx - rx / 2, cy + ry);
+  ctx.lineTo(cx - rx, cy); ctx.lineTo(cx - rx / 2, cy - ry); ctx.lineTo(cx + rx / 2, cy - ry); ctx.closePath();
+}
+// nearest centre in a space where the hexes are regular = the hex under the point
+function celdaEn(g, wx, wy) {
+  const rx = g.dx / 1.5, ry = g.dy / 2, c0 = Math.round((wx - g.x0) / g.dx); let best = null, bd = Infinity;
+  for (let c = c0 - 1; c <= c0 + 1; c++) {
+    const off = impar(c) ? (g.impar === -1 ? -g.dy / 2 : g.dy / 2) : 0, r0 = Math.round((wy - g.y0 - off) / g.dy);
+    for (let r = r0 - 1; r <= r0 + 1; r++) { const [cx, cy] = centro(g, c, r); const nx = (wx - cx) / rx, ny = (wy - cy) / ry * 0.8660254, d = nx * nx + ny * ny; if (d < bd) { bd = d; best = [c, r]; } }
+  }
+  return best;
+}
+function celdasDe(id) {
+  const base = { ...((S.dominio[id] || {}).celdas || {}) }, p = M.pend[id] || {};
+  for (const k in p) base[k] = p[k];
+  for (const k in base) if (!base[k]) delete base[k];
+  return base;
+}
+const notasDe = id => { const n = (S.dominio[id] || {}).notas || {}; const o = {}; for (const k in n) if (n[k]) o[k] = n[k]; return o; };
+function vista(m) {
+  const cv = $('#mapa-cv'); const W = cv ? cv.clientWidth : 800, H = cv ? cv.clientHeight : 600;
+  if (!M.vistas[m.id]) { const s = Math.min(W / m.ancho, H / m.alto); M.vistas[m.id] = { s, tx: (W - m.ancho * s) / 2, ty: (H - m.alto * s) / 2 }; }
+  return M.vistas[m.id];
+}
+async function cargarImagen(m) {
+  if (M.img[m.id] || M.cargando[m.id]) return; M.cargando[m.id] = true;
+  try {
+    const snap = await db.collection('mapatrozos').where('mapa', '==', m.id).get();
+    const trozos = snap.docs.map(d => d.data()).sort((a, b) => a.i - b.i);
+    if (!trozos.length) throw new Error('sin imagen');
+    const bin = atob(trozos.map(t => t.d).join('')); const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], { type: m.tipo || 'image/jpeg' }));
+    const img = new Image(); img.onload = () => { M.img[m.id] = img; M.cargando[m.id] = false; draw(); }; img.onerror = () => { M.cargando[m.id] = 'error'; draw(); };
+    img.src = url;
+  } catch (e) { M.cargando[m.id] = 'error'; draw(); }
+}
+
+function domShell() {
+  return `<div class="sheet" id="dom-root">
+    <div class="head"><div><h2>Dominio</h2><p>Pinta los hexágonos que controla la Orden. Elige un color de la leyenda y haz clic o arrastra sobre el mapa; todos lo veis al momento.</p></div><div class="years" id="dom-mapas"></div></div>
+    <div class="dom">
+      <div style="min-width:0">
+        <div class="dom-bar" id="dom-bar"></div>
+        <div class="map-wrap" id="map-wrap"><canvas id="mapa-cv" aria-label="Mapa del dominio"></canvas><div class="map-msg" id="map-msg"></div><div class="map-tip" id="map-tip" hidden></div></div>
+        <p class="kbd" style="margin:8px 0 0">Rueda del ratón: zoom · Mover: arrastra el mapa · Pintar o Borrar: clic o arrastra · En el móvil, dos dedos para mover y hacer zoom.</p>
+      </div>
+      <aside class="sheet" id="dom-side"></aside>
+    </div>
+  </div>`;
+}
+function domUpdate() {
+  const m = mapaSel(); const ms = mapas();
+  $('#dom-mapas').innerHTML = ms.length > 1 ? '<span>Mapa</span>' + ms.map(x => `<button class="chip" data-act="mapa" data-id="${esc(x.id)}" aria-pressed="${m && x.id === m.id}">${esc(x.nombre)}</button>`).join('') : '';
+  const t = (k, n) => `<button class="btn tool" data-act="tool" data-t="${k}" aria-pressed="${M.tool === k}">${n}</button>`;
+  $('#dom-bar').innerHTML = m ? `${t('mover', 'Mover')}${t('pintar', 'Pintar')}${t('borrar', 'Borrar')}${t('info', 'Notas')}<span class="sep"></span>
+    <button class="btn ghost" data-act="zoom" data-z="1.4" aria-label="Acercar">+</button><button class="btn ghost" data-act="zoom" data-z="0.714" aria-label="Alejar">−</button>
+    <button class="btn ghost" data-act="encajar">Ver entero</button>
+    <label class="ui muted" style="font-size:13px;display:flex;gap:6px;align-items:center"><input type="checkbox" id="dom-rejilla" data-act="rejilla" ${M.rejilla ? 'checked' : ''}>Mostrar rejilla</label>` : '';
+  const wrap = $('#map-wrap'); wrap.classList.toggle('paint', M.tool === 'pintar' || M.tool === 'borrar'); wrap.classList.toggle('info', M.tool === 'info');
+  $('#dom-side').innerHTML = domSide(m);
+  if (m) cargarImagen(m);
+  if (!domUpdate.bound) bindMapa();
+  draw();
+}
+function domSide(m) {
+  if (!m) return `<section class="panel"><h3>Sin mapas</h3><p class="ui muted" style="margin:0">${esDueno ? 'Añade el primero abajo.' : 'El dueño del archivo todavía no ha subido ningún mapa.'}</p></section>${esDueno ? mapaAdmin(null) : ''}`;
+  const cel = celdasDe(m.id), cuenta = {}; for (const k in cel) cuenta[cel[k]] = (cuenta[cel[k]] || 0) + 1;
+  const bs = bandos(), total = Object.keys(cel).length, huerfanos = Object.keys(cuenta).filter(id => !bs.some(b => b.id === id)).reduce((s, id) => s + cuenta[id], 0);
+  const w = canWrite && db ? '' : 'disabled';
+  let info = '';
+  if (M.info) {
+    const [c, r] = M.info.split('_').map(Number), b = bs.find(x => x.id === cel[M.info]), nota = notasDe(m.id)[M.info] || '';
+    info = `<section class="panel"><h3>Hexágono ${c}, ${r}</h3>
+      <p class="ui" style="margin:0 0 8px">${b ? `<span class="tag" style="border-color:${esc(b.color)};color:var(--ink)">${esc(b.nombre)}</span>` : '<span class="muted">Sin pintar</span>'}</p>
+      <form data-form="nota" class="sheet" style="gap:8px"><textarea class="emails" id="nota-hex" name="nota" maxlength="500" placeholder="Qué hay aquí: un fuerte, una amenaza, un campamento…" ${w}>${esc(nota)}</textarea>
+      <div style="display:flex;gap:8px"><button class="btn" type="submit" ${w}>Guardar nota</button><button class="btn ghost" type="button" data-act="cerrarinfo">Cerrar</button></div></form></section>`;
+  }
+  return `${info}
+    <section class="panel"><h3>Leyenda · ${esc(m.nombre)}</h3>
+      <ul class="ley" role="listbox" aria-label="Color para pintar">${bs.map(b => `<li role="option" data-act="bando" data-id="${esc(b.id)}" aria-selected="${b.id === M.bando}">
+        <input type="color" id="i-ley-${esc(b.id)}-color" data-bind="ley" data-a="${esc(b.id)}" data-b="color" value="${esc(b.color)}" aria-label="Color de ${esc(b.nombre)}" ${w}>
+        <input class="txt" id="i-ley-${esc(b.id)}-nombre" data-bind="ley" data-a="${esc(b.id)}" data-b="nombre" value="${esc(b.nombre)}" aria-label="Nombre" ${w}>
+        <span class="cnt">${cuenta[b.id] || 0}</span>${delBtn('delbando', b.id, '×')}</li>`).join('')}</ul>
+      <form class="add" data-form="bando" style="margin-top:10px;padding:8px;gap:6px"><label class="grow">Nuevo color<input name="nombre" required maxlength="40" placeholder="p. ej. Territorio yuan-ti"></label><input type="color" name="color" value="#2f8f8f" aria-label="Color"><button class="btn" type="submit">Añadir</button></form>
+      <p class="ui muted" style="font-size:13px;margin:10px 0 0">${total} ${total === 1 ? 'hexágono pintado' : 'hexágonos pintados'}${m.escala ? ' · ' + esc(m.escala) : ''}${huerfanos ? ` · ${huerfanos} de un color borrado (en gris)` : ''}</p>
+    </section>
+    ${esDueno ? mapaAdmin(m) : ''}`;
+}
+function mapaAdmin(m) {
+  const g = m && m.grid;
+  return `<details class="adder panel" id="dom-admin"><summary>Gestionar mapas (solo tú)</summary>
+    ${m ? `<form data-form="rejilla" class="sheet" style="gap:8px;margin-top:8px"><p class="ui muted" style="font-size:13px;margin:0">Ajuste de la rejilla de «${esc(m.nombre)}», en píxeles del mapa original. Activa "Mostrar rejilla" para ver cómo encaja.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px" class="ui">
+        ${[['x0', 'Origen X'], ['y0', 'Origen Y'], ['dx', 'Entre columnas'], ['dy', 'Entre filas']].map(([k, n]) => `<label class="ui muted" style="font-size:12px;display:grid;gap:2px">${n}<input class="num w" name="${k}" id="g-${k}" value="${esc(g[k])}" inputmode="decimal"></label>`).join('')}
+      </div>
+      <label class="ui muted" style="font-size:12px;display:grid;gap:2px">Columnas impares<select name="impar" id="g-impar"><option value="1" ${g.impar !== -1 ? 'selected' : ''}>media fila más abajo</option><option value="-1" ${g.impar === -1 ? 'selected' : ''}>media fila más arriba</option></select></label>
+      <label class="ui muted" style="font-size:12px;display:grid;gap:2px">Escala (texto)<input name="escala" id="g-escala" value="${esc(m.escala || '')}" maxlength="60" placeholder="1 hexágono = 10 millas"></label>
+      <button class="btn" type="submit">Guardar ajuste</button>
+      <button class="x" type="button" data-act="delmapa" data-id="${esc(m.id)}">Borrar este mapa y lo pintado</button></form>` : ''}
+    <form data-form="mapa" class="sheet" style="gap:8px;margin-top:14px"><p class="ui" style="margin:0;font-weight:700">Añadir un mapa</p>
+      <label class="ui muted" style="font-size:12px;display:grid;gap:2px">Nombre<input name="nombre" required maxlength="40" placeholder="Barovia" style="background:var(--panel);border:1px solid var(--line);padding:6px 8px;border-radius:3px"></label>
+      <label class="ui muted" style="font-size:12px;display:grid;gap:2px">Imagen (JPG o PNG)<input type="file" name="img" accept="image/*" required></label>
+      <button class="btn seal" type="submit">Subir mapa</button>
+      <p class="ui muted" style="font-size:12px;margin:0">Se guarda en vuestra base de datos protegida, no en GitHub: solo la ve la gente de la lista.</p></form>
+  </details>`;
+}
+
+function draw() {
+  const cv = $('#mapa-cv'); if (!cv) return; const m = mapaSel(); const msg = $('#map-msg');
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+  const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
+  if (!m) { msg.textContent = 'Todavía no hay ningún mapa.'; return; }
+  const img = M.img[m.id];
+  msg.textContent = img ? '' : (M.cargando[m.id] === 'error' ? 'No se pudo cargar la imagen del mapa.' : 'Cargando el mapa…');
+  const v = vista(m), g = m.grid;
+  ctx.setTransform(dpr * v.s, 0, 0, dpr * v.s, dpr * v.tx, dpr * v.ty);
+  if (img) { ctx.imageSmoothingQuality = 'high'; ctx.drawImage(img, 0, 0, m.ancho, m.alto); }
+  else { ctx.fillStyle = 'rgba(128,128,128,.12)'; ctx.fillRect(0, 0, m.ancho, m.alto); }
+  const lw = 1 / v.s;
+  // visible range of hexes
+  const wx0 = Math.max(0, -v.tx / v.s), wy0 = Math.max(0, -v.ty / v.s), wx1 = Math.min(m.ancho, (W - v.tx) / v.s), wy1 = Math.min(m.alto, (H - v.ty) / v.s);
+  if (M.rejilla) {
+    const c0 = Math.floor((wx0 - g.x0) / g.dx) - 1, c1 = Math.ceil((wx1 - g.x0) / g.dx) + 1, r0 = Math.floor((wy0 - g.y0) / g.dy) - 1, r1 = Math.ceil((wy1 - g.y0) / g.dy) + 1;
+    if ((c1 - c0) * (r1 - r0) < 30000) {
+      ctx.beginPath(); for (let c = c0; c <= c1; c++) for (let r = r0; r <= r1; r++) hexPath(ctx, g, c, r);
+      ctx.strokeStyle = 'rgba(20,16,20,.55)'; ctx.lineWidth = 1.5 * lw; ctx.stroke();
+    }
+  }
+  const cel = celdasDe(m.id), bs = bandos(), col = {}; bs.forEach(b => col[b.id] = b.color);
+  const porColor = {};
+  for (const k in cel) { const c = col[cel[k]] || '#8a8a8a'; (porColor[c] = porColor[c] || []).push(k); }
+  for (const c in porColor) {
+    ctx.beginPath(); for (const k of porColor[c]) { const [cc, rr] = k.split('_').map(Number); hexPath(ctx, g, cc, rr); }
+    ctx.globalAlpha = 0.45; ctx.fillStyle = c; ctx.fill(); ctx.globalAlpha = 0.95; ctx.strokeStyle = c; ctx.lineWidth = 2.5 * lw; ctx.stroke(); ctx.globalAlpha = 1;
+  }
+  const notas = notasDe(m.id);
+  for (const k in notas) { const [cc, rr] = k.split('_').map(Number); const [cx, cy] = centro(g, cc, rr);
+    ctx.beginPath(); ctx.arc(cx, cy - g.dy * 0.22, Math.max(4 * lw, g.dy * 0.09), 0, Math.PI * 2); ctx.fillStyle = '#f5ecd2'; ctx.fill(); ctx.lineWidth = 2 * lw; ctx.strokeStyle = '#2a2024'; ctx.stroke(); }
+  for (const k of [M.hover, M.info]) { if (!k) continue; const [cc, rr] = k.split('_').map(Number);
+    ctx.beginPath(); hexPath(ctx, g, cc, rr); ctx.lineWidth = 3 * lw; ctx.strokeStyle = k === M.info ? '#ffffff' : '#141014'; ctx.stroke(); }
+}
+
+function aMundo(m, ev) { const r = $('#mapa-cv').getBoundingClientRect(), v = vista(m); return [(ev.clientX - r.left - v.tx) / v.s, (ev.clientY - r.top - v.ty) / v.s]; }
+function claveEn(m, ev) { const [wx, wy] = aMundo(m, ev); if (wx < 0 || wy < 0 || wx > m.ancho || wy > m.alto) return null; const cr = celdaEn(m.grid, wx, wy); return cr ? cr[0] + '_' + cr[1] : null; }
+function zoomEn(m, f, sx, sy) { const v = vista(m); const ns = Math.min(Math.max(v.s * f, 0.02), 4); const k = ns / v.s; v.tx = sx - (sx - v.tx) * k; v.ty = sy - (sy - v.ty) * k; v.s = ns; draw(); }
+function pintar(m, key) {
+  if (!key || !M.trazo) return; const val = M.tool === 'borrar' ? null : M.bando;
+  const actual = celdasDe(m.id)[key] || null; if (actual === val || M.trazo.vistos.has(key)) return;
+  M.trazo.vistos.add(key); M.trazo.n++;
+  (M.pend[m.id] = M.pend[m.id] || {})[key] = val; draw();
+  clearTimeout(M.flushT); M.flushT = setTimeout(() => volcar(m.id), 350);
+}
+function volcar(id) {
+  const p = M.pend[id]; if (!p || !Object.keys(p).length) return; const lote = { ...p };
+  upd(`dominio/${id}`, { celdas: lote }).then(() => { const cur = M.pend[id] || {}; for (const k in lote) if (cur[k] === lote[k]) delete cur[k]; draw(); })
+    .catch(() => { M.pend[id] = {}; schedule(); });
+}
+function bindMapa() {
+  domUpdate.bound = true;
+  const cv = () => $('#mapa-cv');
+  document.addEventListener('pointerdown', ev => {
+    if (ev.target !== cv()) return; const m = mapaSel(); if (!m) return;
+    cv().setPointerCapture(ev.pointerId); M.ptrs.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (M.ptrs.size === 2) { M.trazo = null; const [a, b] = [...M.ptrs.values()]; M.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; return; }
+    const pan = M.tool === 'mover' || ev.button === 1 || ev.button === 2;
+    if (pan) { M.arrastre = { x: ev.clientX, y: ev.clientY }; $('#map-wrap').classList.add('dragging'); return; }
+    const key = claveEn(m, ev); if (!key) return;
+    if (M.tool === 'info') { M.info = key; schedule(); return; }
+    if (!guard()) return;
+    M.trazo = { n: 0, vistos: new Set(), tool: M.tool, bando: M.bando, mapa: m.id }; pintar(m, key);
+  });
+  document.addEventListener('pointermove', ev => {
+    const m = mapaSel(); const c = cv(); if (!m || !c) return;
+    if (M.ptrs.has(ev.pointerId)) M.ptrs.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (M.pinch && M.ptrs.size === 2) {
+      const [a, b] = [...M.ptrs.values()], d = Math.hypot(a.x - b.x, a.y - b.y), x = (a.x + b.x) / 2, y = (a.y + b.y) / 2, r = c.getBoundingClientRect(), v = vista(m);
+      v.tx += x - M.pinch.x; v.ty += y - M.pinch.y; zoomEn(m, d / M.pinch.d, x - r.left, y - r.top); M.pinch = { d, x, y }; return;
+    }
+    if (M.arrastre) { const v = vista(m); v.tx += ev.clientX - M.arrastre.x; v.ty += ev.clientY - M.arrastre.y; M.arrastre = { x: ev.clientX, y: ev.clientY }; draw(); return; }
+    if (ev.target !== c) { if (M.hover) { M.hover = null; $('#map-tip').hidden = true; draw(); } return; }
+    const key = claveEn(m, ev);
+    if (M.trazo) pintar(m, key);
+    if (key !== M.hover) { M.hover = key; draw(); }
+    const tip = $('#map-tip'), cel = key ? celdasDe(m.id)[key] : null, nota = key ? notasDe(m.id)[key] : null, b = bandos().find(x => x.id === cel);
+    if (key && (b || nota)) { const r = c.getBoundingClientRect(); tip.textContent = [b && b.nombre, nota].filter(Boolean).join(' · ').slice(0, 90); tip.hidden = false;
+      tip.style.left = Math.min(ev.clientX - r.left + 14, r.width - 160) + 'px'; tip.style.top = (ev.clientY - r.top + 14) + 'px'; } else tip.hidden = true;
+  });
+  const fin = ev => {
+    M.ptrs.delete(ev.pointerId); if (M.ptrs.size < 2) M.pinch = null;
+    if (M.arrastre) { M.arrastre = null; const w = $('#map-wrap'); if (w) w.classList.remove('dragging'); }
+    if (M.trazo && M.ptrs.size === 0) { const t = M.trazo; M.trazo = null; if (t.n) { const m = mapas().find(x => x.id === t.mapa), b = bandos().find(x => x.id === t.bando);
+      log(t.tool === 'borrar' ? `borró ${t.n} ${t.n === 1 ? 'hexágono' : 'hexágonos'} en el mapa de ${m ? m.nombre : t.mapa}` : `pintó ${t.n} ${t.n === 1 ? 'hexágono' : 'hexágonos'} de «${b ? b.nombre : t.bando}» en el mapa de ${m ? m.nombre : t.mapa}`); } }
+  };
+  document.addEventListener('pointerup', fin); document.addEventListener('pointercancel', fin);
+  document.addEventListener('wheel', ev => { const c = cv(); if (ev.target !== c) return; ev.preventDefault(); const m = mapaSel(); if (!m) return; const r = c.getBoundingClientRect();
+    zoomEn(m, Math.exp(-ev.deltaY * 0.0015), ev.clientX - r.left, ev.clientY - r.top); }, { passive: false });
+  document.addEventListener('contextmenu', ev => { if (ev.target === cv()) ev.preventDefault(); });
+  window.addEventListener('resize', () => draw());
+}
+async function subirMapa(nombre, file) {
+  const id = slug(nombre); if (mapas().some(m => m.id === id)) { toast('Ya hay un mapa con ese nombre.'); throw 'skip'; }
+  toast('Preparando la imagen…');
+  const url = URL.createObjectURL(file), img = await new Promise((ok, ko) => { const i = new Image(); i.onload = () => ok(i); i.onerror = ko; i.src = url; });
+  const k = Math.min(1, MAX_IMG / img.naturalWidth), w = Math.round(img.naturalWidth * k), h = Math.round(img.naturalHeight * k);
+  const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(img, 0, 0, w, h);
+  const b64 = c.toDataURL('image/jpeg', 0.7).split(',')[1]; URL.revokeObjectURL(url);
+  const n = Math.ceil(b64.length / TROZO);
+  for (let i = 0; i < n; i++) await db.doc(`mapatrozos/${id}-${i}`).set({ mapa: id, i, d: b64.slice(i * TROZO, (i + 1) * TROZO) });
+  // starting grid: 40 regular flat-top columns across; the owner fine-tunes it afterwards
+  const W = img.naturalWidth, H = img.naturalHeight, dx = r6(W / 40), lado = dx / 1.5, dy = r6(lado * Math.sqrt(3));
+  await db.doc(`mapas/${id}`).set({ nombre, ancho: W, alto: H, tipo: 'image/jpeg', trozos: n, orden: mapas().length + 1, escala: '',
+    grid: { x0: r6(lado), y0: r6(dy / 2), dx, dy, impar: 1 } });
+  M.sel = id; store.set('mapa', id); M.rejilla = true;
+  log(`subió el mapa «${nombre}»`);
+}
+
 /* ---------- people ---------- */
 let peerList = [];
 function peersHtml(full) {
@@ -1158,6 +1466,9 @@ function arrancar() {
   subList('registro', db.collection('registro').orderBy('ts', 'desc').limit(40));
   unsubs.push(db.collection('personas').onSnapshot(snap => {
     snap.docs.forEach(d => { const p = d.data(); NAMES[d.id] = { name: p.nombre || '', avatarUrl: p.foto || '' }; }); renderPeers(); schedule(); }, () => {}));
+  subList('mapas');
+  unsubs.push(db.collection('dominio').onSnapshot(snap => { const o = {}; snap.docs.forEach(d => o[d.id] = d.data()); S.dominio = o; schedule(); }, onErr));
+  unsubs.push(db.doc('reglas/leyenda').onSnapshot(s => { S.leyenda = s.exists ? s.data() : null; schedule(); }, () => {}));
   unsubs.push(db.doc('reglas/jungla').onSnapshot(s => { S.jungla = s.exists ? s.data() : null; schedule(); }, () => {}));
   unsubs.push(db.doc('campana/estado').onSnapshot(s => { const v = s.exists ? s.data().anio : null; S.campana = typeof v === 'number' ? v : null; schedule(); }, () => {}));
   unsubs.push(db.collection('presencia').onSnapshot(snap => { presencia = snap.docs.map(d => ({ id: d.id, ...d.data() })); buildPeers(); }, () => {}));
@@ -1169,7 +1480,7 @@ function parar() {
   unsubs.forEach(u => { try { u(); } catch {} }); unsubs = [];
   for (const k of ['poblacion', 'ganado', 'tierras', 'mina']) S[k] = {};
   for (const k of ['monedas', 'gemas', 'objetos', 'cronica', 'objetivos', 'registro']) S[k] = [];
-  S.ready = {}; S.campana = null; S.jungla = null; presencia = []; peerList = []; connected = false;
+  S.ready = {}; S.campana = null; S.jungla = null; S.mapas = []; S.dominio = {}; S.leyenda = null; M.pend = {}; presencia = []; peerList = []; connected = false;
 }
 async function comprobarAcceso() {
   const email = (me.email || '').toLowerCase();
