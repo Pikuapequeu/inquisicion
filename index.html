@@ -1180,12 +1180,12 @@ function campanaPanel() {
 // `dominio/<id>` as { celdas: {"c_r": bandoId}, notas: {"c_r": text} }. Flat-top hexes,
 // "odd-q" layout: column c centre x = x0 + c·dx; odd columns sit half a row lower.
 const BANDOS_DEF = [
-  { id: 'inquisicion', nombre: 'La Inquisición', color: '#b8323f' },
-  { id: 'aliados', nombre: 'Aliados', color: '#c9a45c' },
+  { id: 'inquisicion', nombre: 'La Inquisición', color: '#f2c214' }, // Lathander's dawn gold
+  { id: 'aliados', nombre: 'Aliados', color: '#7a55b0' },
   { id: 'caza', nombre: 'Coto de caza', color: '#4f9a4a' },
   { id: 'explorado', nombre: 'Explorado', color: '#3f86c0' },
   { id: 'disputa', nombre: 'En disputa', color: '#e0862b' },
-  { id: 'enemigo', nombre: 'Enemigo', color: '#7a55b0' },
+  { id: 'enemigo', nombre: 'Enemigo', color: '#c42b2b' },
 ];
 const MAX_IMG = 3000, TROZO = 800000;
 const M = { sel: store.get('mapa', null), img: {}, cargando: {}, pend: {}, flushT: null, tool: 'mover', bando: store.get('bando', 'inquisicion'),
