@@ -214,6 +214,21 @@ details.adder[open] > summary::before { content: "− " }
 .map-wrap.dragging canvas { cursor: grabbing }
 .map-msg { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--f-ui); color: var(--muted); pointer-events: none; text-align: center; padding: 16px }
 .map-tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--bg); font-family: var(--f-ui); font-size: 12px; padding: 3px 8px; border-radius: 3px; white-space: nowrap; z-index: 2 }
+/* full screen: tools + legend in a left column, the map fills the rest; ☰ hides the column */
+.map-fs { display: none }
+.dom.fs { position: fixed; inset: 0; z-index: 50; background: var(--bg); padding: 12px; gap: 12px; align-items: stretch;
+  grid-template-columns: min(310px, 82vw) minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) }
+.dom.fs > .dom-main { display: contents }
+.dom.fs #dom-anios { grid-column: 1; grid-row: 1; margin: 0 !important }
+.dom.fs .dom-bar { grid-column: 1; grid-row: 2; margin: 0 }
+.dom.fs #dom-side { grid-column: 1; grid-row: 3; overflow: auto; min-height: 0 }
+.dom.fs .map-wrap { grid-column: 2; grid-row: 1 / -1; height: auto; min-height: 0 }
+.dom.fs .kbd { display: none }
+.dom.fs .map-fs { display: flex; gap: 6px; position: absolute; top: 10px; left: 10px; z-index: 2 }
+.map-fs .btn { background: var(--panel); box-shadow: 0 2px 8px rgba(0,0,0,.3) }
+.dom.fs.sin-lado { grid-template-columns: minmax(0, 1fr) }
+.dom.fs.sin-lado #dom-anios, .dom.fs.sin-lado .dom-bar, .dom.fs.sin-lado #dom-side { display: none }
+.dom.fs.sin-lado .map-wrap { grid-column: 1 }
 /* a note's own map (e.g. a city plan) opened on top of the territory map */
 .plano { position: absolute; inset: 12px; z-index: 3; display: grid; grid-template-rows: auto minmax(0, 1fr); background: var(--panel); border: 1px solid var(--ink); box-shadow: 0 10px 40px rgba(0,0,0,.45) }
 .plano[hidden] { display: none }
@@ -998,7 +1013,7 @@ document.addEventListener('change', e => {
   el.dataset.dirty = ''; const h = BIND[el.dataset.bind]; if (h) h(el);
 });
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.dataset && e.target.dataset.bind && e.target.tagName === 'INPUT') e.target.blur(); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && M.plano) { M.plano = null; planoUpdate(); } });
+document.addEventListener('keydown', e => { if (e.key !== 'Escape') return; if (M.plano) { M.plano = null; planoUpdate(); } else if (M.fs) pantallaCompleta(false); });
 
 /* ---------- forms ---------- */
 const maxOrden = list => list.reduce((m, x) => Math.max(m, x.orden || 0), 0) + 1;
@@ -1111,6 +1126,8 @@ const ACTS = {
   cerrarinfo() { M.info = null; schedule(); },
   verplano() { const m = mapaSel(); if (m && M.info) abrirPlano(m.id, M.info); },
   cerrarplano() { M.plano = null; planoUpdate(); },
+  fs() { pantallaCompleta(!M.fs); },
+  lado() { M.sinLado = !M.sinLado; schedule(); },
   planozoom(b) { zoomPlano(+b.dataset.z); },
   planoencajar() { if (M.plano) { M.plano.z = null; planoUpdate(); } },
   delplano(b) { if (!guard()) return; const m = mapaSel(), k = b.dataset.id, p = m && planosDe(m.id)[k]; if (!p) return;
@@ -1149,6 +1166,7 @@ document.addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if (b && !b.disabled && ACTS[b.dataset.act]) ACTS[b.dataset.act](b);
 });
 function setTab(k) {
+  if (M.fs) pantallaCompleta(false);
   V.tab = TABS.some(t => t[0] === k) ? k : 'resumen'; store.set('tab', V.tab);
   try { history.replaceState(null, '', '#' + V.tab); } catch {}
   latido();
@@ -1222,7 +1240,18 @@ const BANDOS_DEF = [
 ];
 const MAX_IMG = 3000, TROZO = 800000;
 const M = { sel: store.get('mapa', null), img: {}, cargando: {}, pend: {}, flushT: null, tool: 'mover', bando: store.get('bando', 'inquisicion'),
-  vistas: {}, hover: null, info: null, rejilla: false, trazo: null, ptrs: new Map(), pinch: null, anio: null, creados: new Set(), plano: null };
+  vistas: {}, hover: null, info: null, rejilla: false, trazo: null, ptrs: new Map(), pinch: null, anio: null, creados: new Set(), plano: null, fs: false, sinLado: false };
+// Full screen: the browser's Fullscreen API where it exists, otherwise just the fixed CSS layout
+// (iPhone Safari). The legend and tools move to a left column that ☰ hides.
+function pantallaCompleta(on) {
+  const el = $('#dom-cuerpo'); M.fs = !!(on && el); if (!M.fs) M.sinLado = false;
+  try {
+    if (M.fs && el.requestFullscreen && !document.fullscreenElement) el.requestFullscreen().catch(() => {});
+    else if (!M.fs && document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  } catch {}
+  schedule();
+}
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && M.fs) pantallaCompleta(false); else draw(); });
 const bandos = () => (S.leyenda && Array.isArray(S.leyenda.bandos) && S.leyenda.bandos.length) ? S.leyenda.bandos : BANDOS_DEF;
 const mapas = () => [...(S.mapas || [])].sort((a, b) => (a.orden || 0) - (b.orden || 0) || String(a.nombre).localeCompare(b.nombre));
 const mapaSel = () => { const ms = mapas(); return ms.find(m => m.id === M.sel) || ms[0] || null; };
@@ -1328,11 +1357,12 @@ function domShell() {
   return `<div class="sheet" id="dom-root">
     <div class="head" style="margin-bottom:0"><div><h2>Dominio</h2><p>Pinta los hexágonos que controla la Orden. Elige un color de la leyenda y haz clic o arrastra sobre el mapa; todos lo veis al momento. Cada año guarda su propio territorio: elige el año arriba del mapa.</p></div></div>
     <div class="subtabs" id="dom-mapas" role="tablist" aria-label="Mapas"></div>
-    <div class="dom">
-      <div style="min-width:0">
+    <div class="dom" id="dom-cuerpo">
+      <div class="dom-main" style="min-width:0">
         <div class="years" id="dom-anios" style="margin-bottom:10px"></div>
         <div class="dom-bar" id="dom-bar"></div>
-        <div class="map-wrap" id="map-wrap"><canvas id="mapa-cv" aria-label="Mapa del dominio"></canvas><div class="map-msg" id="map-msg"></div><div class="map-tip" id="map-tip" hidden></div><div class="plano" id="plano" hidden></div></div>
+        <div class="map-wrap" id="map-wrap"><canvas id="mapa-cv" aria-label="Mapa del dominio"></canvas><div class="map-msg" id="map-msg"></div><div class="map-tip" id="map-tip" hidden></div><div class="plano" id="plano" hidden></div>
+          <div class="map-fs"><button class="btn" id="dom-lado" data-act="lado" aria-label="Mostrar u ocultar la leyenda y las herramientas" title="Mostrar u ocultar el panel">☰</button><button class="btn" data-act="fs" title="Salir de pantalla completa (Esc)">Salir</button></div></div>
         <p class="kbd" style="margin:8px 0 0">Rueda del ratón: zoom · Mover: arrastra el mapa · Pintar o Borrar: clic o arrastra · En el móvil, dos dedos para mover y hacer zoom · Con Mover, clic en una nota con mapa (punto dorado) para abrirlo.</p>
       </div>
       <aside class="sheet" id="dom-side"></aside>
@@ -1348,7 +1378,10 @@ function domUpdate() {
   $('#dom-bar').innerHTML = m ? `${t('mover', 'Mover')}${t('pintar', 'Pintar')}${t('borrar', 'Borrar')}${t('info', 'Notas')}<span class="sep"></span>
     <button class="btn ghost" data-act="zoom" data-z="1.4" aria-label="Acercar">+</button><button class="btn ghost" data-act="zoom" data-z="0.714" aria-label="Alejar">−</button>
     <button class="btn ghost" data-act="encajar">Ver entero</button>
-    <label class="ui muted" style="font-size:13px;display:flex;gap:6px;align-items:center"><input type="checkbox" id="dom-rejilla" data-act="rejilla" ${M.rejilla ? 'checked' : ''}>Mostrar rejilla</label>` : '';
+    <label class="ui muted" style="font-size:13px;display:flex;gap:6px;align-items:center"><input type="checkbox" id="dom-rejilla" data-act="rejilla" ${M.rejilla ? 'checked' : ''}>Mostrar rejilla</label>
+    <button class="btn ghost" data-act="fs">${M.fs ? 'Salir de pantalla completa' : 'Pantalla completa'}</button>` : '';
+  const cuerpo = $('#dom-cuerpo'); cuerpo.classList.toggle('fs', M.fs); cuerpo.classList.toggle('sin-lado', M.fs && M.sinLado);
+  $('#dom-lado').setAttribute('aria-expanded', String(!M.sinLado));
   const wrap = $('#map-wrap'); wrap.classList.toggle('paint', M.tool === 'pintar' || M.tool === 'borrar'); wrap.classList.toggle('info', M.tool === 'info');
   $('#dom-side').innerHTML = domSide(m);
   if (m) cargarImagen(m);
