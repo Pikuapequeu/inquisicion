@@ -214,6 +214,15 @@ details.adder[open] > summary::before { content: "− " }
 .map-wrap.dragging canvas { cursor: grabbing }
 .map-msg { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--f-ui); color: var(--muted); pointer-events: none; text-align: center; padding: 16px }
 .map-tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--bg); font-family: var(--f-ui); font-size: 12px; padding: 3px 8px; border-radius: 3px; white-space: nowrap; z-index: 2 }
+/* a note's own map (e.g. a city plan) opened on top of the territory map */
+.plano { position: absolute; inset: 12px; z-index: 3; display: grid; grid-template-rows: auto minmax(0, 1fr); background: var(--panel); border: 1px solid var(--ink); box-shadow: 0 10px 40px rgba(0,0,0,.45) }
+.plano[hidden] { display: none }
+.plano-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); font-family: var(--f-ui) }
+.plano-bar b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.plano-body { overflow: auto; cursor: grab; touch-action: pan-x pan-y; display: grid; place-items: center }
+.plano-body.dragging { cursor: grabbing }
+.plano-body img { display: block; max-width: none; user-select: none; -webkit-user-drag: none }
+.plano-body p { font-family: var(--f-ui); color: var(--muted) }
 .ley { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px }
 .ley li { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 5px 6px; border: 1px solid transparent; border-radius: 4px; cursor: pointer }
 .ley li[aria-selected="true"] { border-color: var(--ink); background: var(--panel-2) }
@@ -989,6 +998,7 @@ document.addEventListener('change', e => {
   el.dataset.dirty = ''; const h = BIND[el.dataset.bind]; if (h) h(el);
 });
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.dataset && e.target.dataset.bind && e.target.tagName === 'INPUT') e.target.blur(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && M.plano) { M.plano = null; planoUpdate(); } });
 
 /* ---------- forms ---------- */
 const maxOrden = list => list.reduce((m, x) => Math.max(m, x.orden || 0), 0) + 1;
@@ -1016,6 +1026,15 @@ const FORMS = {
     const m = mapaSel(); if (!m || !M.info) return Promise.reject('skip'); const t = String(fd.get('nota') || '').trim().slice(0, 500), k = M.info;
     const [c, r] = k.split('_');
     return upd(`dominio/${m.id}`, { notas: { [k]: t || null } }).then(() => log(t ? `anotó en el hexágono ${c}, ${r} de ${m.nombre}: «${t.slice(0, 80)}»` : `borró la nota del hexágono ${c}, ${r} de ${m.nombre}`));
+  },
+  async plano(fd) {
+    const m = mapaSel(), k = M.info, file = fd.get('img'); if (!m || !k) throw 'skip';
+    if (!file || !file.size) { toast('Elige una imagen.'); throw 'skip'; }
+    const [c, r] = k.split('_'), nombre = String(fd.get('nombre') || '').trim().slice(0, 40) || (notasDe(m.id)[k] || '').slice(0, 40) || `Hexágono ${c}, ${r}`;
+    toast('Preparando la imagen…');
+    const id = `nota-${m.id}-${k}-${Date.now().toString(36)}`, info = await subirImagen(id, file);
+    await upd(`dominio/${m.id}`, { planos: { [k]: { id, nombre, ...info } } });
+    log(`puso el mapa «${nombre}» en la nota del hexágono ${c}, ${r} de ${m.nombre}`); abrirPlano(m.id, k);
   },
   bando(fd) {
     const nombre = String(fd.get('nombre') || '').trim(), color = String(fd.get('color') || '#888888'); const bs = bandos();
@@ -1090,11 +1109,19 @@ const ACTS = {
   mapa(b) { M.sel = b.dataset.id; store.set('mapa', M.sel); M.info = null; M.hover = null; schedule(); },
   bando(b) { M.bando = b.dataset.id; store.set('bando', M.bando); if (M.tool === 'mover' || M.tool === 'info') M.tool = 'pintar'; schedule(); },
   cerrarinfo() { M.info = null; schedule(); },
+  verplano() { const m = mapaSel(); if (m && M.info) abrirPlano(m.id, M.info); },
+  cerrarplano() { M.plano = null; planoUpdate(); },
+  planozoom(b) { zoomPlano(+b.dataset.z); },
+  planoencajar() { if (M.plano) { M.plano.z = null; planoUpdate(); } },
+  delplano(b) { if (!guard()) return; const m = mapaSel(), k = b.dataset.id, p = m && planosDe(m.id)[k]; if (!p) return;
+    confirmClick(b, () => upd(`dominio/${m.id}`, { planos: { [k]: null } }).then(() => {
+      borrarTrozos(p.id).catch(() => {}); delete M.img[p.id]; delete M.cargando[p.id]; planoUpdate(); log(`quitó el mapa «${p.nombre}» de una nota de ${m.nombre}`); }).catch(() => {})); },
   domanio(b) { M.anio = +b.dataset.y === actual() ? null : +b.dataset.y; M.hover = null; schedule(); },
   delbando(b) { if (!guard()) return; const bs = bandos(), x = bs.find(z => z.id === b.dataset.id); if (!x) return;
     confirmClick(b, () => setDoc('reglas/leyenda', { bandos: bs.filter(z => z.id !== x.id) }).then(() => log(`quitó el color «${x.nombre}» de la leyenda del dominio`)).catch(() => {})); },
   delmapa(b) { if (!guard() || !esDueno) return; const m = mapas().find(x => x.id === b.dataset.id); if (!m) return;
     confirmClick(b, async () => { try {
+      for (const p of Object.values(planosDe(m.id))) await borrarTrozos(p.id);
       const tz = await db.collection('mapatrozos').where('mapa', '==', m.id).get(); const batch = db.batch();
       tz.docs.forEach(d => batch.delete(d.ref)); batch.delete(db.doc(`mapas/${m.id}`)); batch.delete(db.doc(`dominio/${m.id}`));
       aniosDom(m.id).forEach(y => batch.delete(db.doc(`dominio/${domDoc(m.id, y)}`))); await batch.commit();
@@ -1195,7 +1222,7 @@ const BANDOS_DEF = [
 ];
 const MAX_IMG = 3000, TROZO = 800000;
 const M = { sel: store.get('mapa', null), img: {}, cargando: {}, pend: {}, flushT: null, tool: 'mover', bando: store.get('bando', 'inquisicion'),
-  vistas: {}, hover: null, info: null, rejilla: false, trazo: null, ptrs: new Map(), pinch: null, anio: null, creados: new Set() };
+  vistas: {}, hover: null, info: null, rejilla: false, trazo: null, ptrs: new Map(), pinch: null, anio: null, creados: new Set(), plano: null };
 const bandos = () => (S.leyenda && Array.isArray(S.leyenda.bandos) && S.leyenda.bandos.length) ? S.leyenda.bandos : BANDOS_DEF;
 const mapas = () => [...(S.mapas || [])].sort((a, b) => (a.orden || 0) - (b.orden || 0) || String(a.nombre).localeCompare(b.nombre));
 const mapaSel = () => { const ms = mapas(); return ms.find(m => m.id === M.sel) || ms[0] || null; };
@@ -1233,6 +1260,9 @@ function celdasDe(id, y = domAnio()) {
   return base;
 }
 const notasDe = id => { const n = (S.dominio[id] || {}).notas || {}; const o = {}; for (const k in n) if (n[k]) o[k] = n[k]; return o; };
+// A note can carry its own map (a city plan…): `dominio/<id>.planos["c_r"]` = { id, nombre, ancho, alto, tipo },
+// image chunks in `mapatrozos` under that id. Like notes, it is the same in every year.
+const planosDe = id => { const n = (S.dominio[id] || {}).planos || {}; const o = {}; for (const k in n) if (n[k] && n[k].id) o[k] = n[k]; return o; };
 function vista(m) {
   const cv = $('#mapa-cv'); const W = cv ? cv.clientWidth : 800, H = cv ? cv.clientHeight : 600;
   if (!M.vistas[m.id]) { const s = Math.min(W / m.ancho, H / m.alto); M.vistas[m.id] = { s, tx: (W - m.ancho * s) / 2, ty: (H - m.alto * s) / 2 }; }
@@ -1247,9 +1277,51 @@ async function cargarImagen(m) {
     const bin = atob(trozos.map(t => t.d).join('')); const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     const url = URL.createObjectURL(new Blob([bytes], { type: m.tipo || 'image/jpeg' }));
-    const img = new Image(); img.onload = () => { M.img[m.id] = img; M.cargando[m.id] = false; draw(); }; img.onerror = () => { M.cargando[m.id] = 'error'; draw(); };
+    const img = new Image(); img.onload = () => { M.img[m.id] = img; M.cargando[m.id] = false; draw(); planoUpdate(); }; img.onerror = () => { M.cargando[m.id] = 'error'; draw(); planoUpdate(); };
     img.src = url;
-  } catch (e) { M.cargando[m.id] = 'error'; draw(); }
+  } catch (e) { M.cargando[m.id] = 'error'; draw(); planoUpdate(); }
+}
+// Shrinks an image file to MAX_IMG px wide, re-encodes it as JPEG and stores it in chunks under `id`.
+async function subirImagen(id, file) {
+  const url = URL.createObjectURL(file), img = await new Promise((ok, ko) => { const i = new Image(); i.onload = () => ok(i); i.onerror = ko; i.src = url; });
+  const k = Math.min(1, MAX_IMG / img.naturalWidth), w = Math.round(img.naturalWidth * k), h = Math.round(img.naturalHeight * k);
+  const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(img, 0, 0, w, h);
+  const b64 = c.toDataURL('image/jpeg', 0.7).split(',')[1]; URL.revokeObjectURL(url);
+  const n = Math.ceil(b64.length / TROZO);
+  for (let i = 0; i < n; i++) await db.doc(`mapatrozos/${id}-${i}`).set({ mapa: id, i, d: b64.slice(i * TROZO, (i + 1) * TROZO) });
+  return { ancho: img.naturalWidth, alto: img.naturalHeight, tipo: 'image/jpeg', trozos: n };
+}
+async function borrarTrozos(id) {
+  const tz = await db.collection('mapatrozos').where('mapa', '==', id).get(); const batch = db.batch();
+  tz.docs.forEach(d => batch.delete(d.ref)); await batch.commit();
+}
+// the note map viewer: M.plano = { mapa, key, z } (z = zoom, null = fit to the window)
+function abrirPlano(mapaId, key) { M.plano = { mapa: mapaId, key, z: null }; planoUpdate(); }
+function planoUpdate() {
+  const el = $('#plano'); if (!el) return;
+  const p = M.plano && planosDe(M.plano.mapa)[M.plano.key];
+  if (!p) { M.plano = null; el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false; cargarImagen(p);
+  const img = M.img[p.id], body = $('#plano-body');
+  if (!body || el.dataset.id !== p.id) {
+    el.dataset.id = p.id;
+    el.innerHTML = `<div class="plano-bar"><b></b>
+      <button class="btn ghost" data-act="planozoom" data-z="1.4" aria-label="Acercar">+</button><button class="btn ghost" data-act="planozoom" data-z="0.714" aria-label="Alejar">−</button>
+      <button class="btn ghost" data-act="planoencajar">Ver entero</button><button class="btn" data-act="cerrarplano">Cerrar</button></div>
+      <div class="plano-body" id="plano-body"></div>`;
+  }
+  el.querySelector('.plano-bar b').textContent = p.nombre || 'Mapa';
+  const b = $('#plano-body');
+  if (!img) { b.innerHTML = `<p>${M.cargando[p.id] === 'error' ? 'No se pudo cargar este mapa.' : 'Cargando el mapa…'}</p>`; return; }
+  if (!b.querySelector('img')) { b.innerHTML = ''; b.appendChild(img); img.alt = p.nombre || ''; img.draggable = false; }
+  if (M.plano.z == null) M.plano.z = Math.min(1, (b.clientWidth - 4) / p.ancho, (b.clientHeight - 4) / p.alto);
+  img.style.width = Math.round(p.ancho * M.plano.z) + 'px';
+}
+function zoomPlano(f) {
+  const b = $('#plano-body'), p = M.plano && planosDe(M.plano.mapa)[M.plano.key]; if (!b || !p || M.plano.z == null) return;
+  const cx = (b.scrollLeft + b.clientWidth / 2) / M.plano.z, cy = (b.scrollTop + b.clientHeight / 2) / M.plano.z;
+  M.plano.z = Math.min(Math.max(M.plano.z * f, 0.05), 3); planoUpdate();
+  b.scrollLeft = cx * M.plano.z - b.clientWidth / 2; b.scrollTop = cy * M.plano.z - b.clientHeight / 2;
 }
 
 function domShell() {
@@ -1260,8 +1332,8 @@ function domShell() {
       <div style="min-width:0">
         <div class="years" id="dom-anios" style="margin-bottom:10px"></div>
         <div class="dom-bar" id="dom-bar"></div>
-        <div class="map-wrap" id="map-wrap"><canvas id="mapa-cv" aria-label="Mapa del dominio"></canvas><div class="map-msg" id="map-msg"></div><div class="map-tip" id="map-tip" hidden></div></div>
-        <p class="kbd" style="margin:8px 0 0">Rueda del ratón: zoom · Mover: arrastra el mapa · Pintar o Borrar: clic o arrastra · En el móvil, dos dedos para mover y hacer zoom.</p>
+        <div class="map-wrap" id="map-wrap"><canvas id="mapa-cv" aria-label="Mapa del dominio"></canvas><div class="map-msg" id="map-msg"></div><div class="map-tip" id="map-tip" hidden></div><div class="plano" id="plano" hidden></div></div>
+        <p class="kbd" style="margin:8px 0 0">Rueda del ratón: zoom · Mover: arrastra el mapa · Pintar o Borrar: clic o arrastra · En el móvil, dos dedos para mover y hacer zoom · Con Mover, clic en una nota con mapa (punto dorado) para abrirlo.</p>
       </div>
       <aside class="sheet" id="dom-side"></aside>
     </div>
@@ -1281,7 +1353,8 @@ function domUpdate() {
   $('#dom-side').innerHTML = domSide(m);
   if (m) cargarImagen(m);
   if (!domUpdate.bound) bindMapa();
-  draw();
+  if (M.plano && (!m || M.plano.mapa !== m.id)) M.plano = null;
+  draw(); planoUpdate();
 }
 function domSide(m) {
   if (!m) return `<section class="panel"><h3>Sin mapas</h3><p class="ui muted" style="margin:0">${esDueno ? 'Añade el primero abajo.' : 'El dueño del archivo todavía no ha subido ningún mapa.'}</p></section>${esDueno ? mapaAdmin(null) : ''}`;
@@ -1290,11 +1363,20 @@ function domSide(m) {
   const w = canWrite && db ? '' : 'disabled';
   let info = '';
   if (M.info) {
-    const [c, r] = M.info.split('_').map(Number), b = bs.find(x => x.id === cel[M.info]), nota = notasDe(m.id)[M.info] || '';
+    const [c, r] = M.info.split('_').map(Number), b = bs.find(x => x.id === cel[M.info]), nota = notasDe(m.id)[M.info] || '', plano = planosDe(m.id)[M.info];
     info = `<section class="panel"><h3>Hexágono ${c}, ${r}</h3>
       <p class="ui" style="margin:0 0 8px">${b ? `<span class="tag" style="border-color:${esc(b.color)};color:var(--ink)">${esc(b.nombre)}</span>` : '<span class="muted">Sin pintar</span>'}</p>
       <form data-form="nota" class="sheet" style="gap:8px"><textarea class="emails" id="nota-hex" name="nota" maxlength="500" placeholder="Qué hay aquí: un fuerte, una amenaza, un campamento…" ${w}>${esc(nota)}</textarea>
-      <div style="display:flex;gap:8px"><button class="btn" type="submit" ${w}>Guardar nota</button><button class="btn ghost" type="button" data-act="cerrarinfo">Cerrar</button></div></form></section>`;
+      <div style="display:flex;gap:8px"><button class="btn" type="submit" ${w}>Guardar nota</button><button class="btn ghost" type="button" data-act="cerrarinfo">Cerrar</button></div></form>
+      ${plano ? `<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px"><span class="ui" style="flex:1;min-width:0">Mapa: <b>${esc(plano.nombre)}</b></span>
+          <button class="btn seal" data-act="verplano">Abrir mapa</button>${delBtn('delplano', M.info, 'Quitar mapa')}</div>`
+        : `<details class="adder" id="nota-plano-add" style="margin-top:12px"><summary>Añadir un mapa a esta nota</summary>
+          <form data-form="plano" class="sheet" style="gap:8px;margin-top:8px">
+            <label class="ui muted" style="font-size:12px;display:grid;gap:2px">Nombre<input name="nombre" maxlength="40" placeholder="Vallaki" style="background:var(--panel);border:1px solid var(--line);padding:6px 8px;border-radius:3px" ${w}></label>
+            <label class="ui muted" style="font-size:12px;display:grid;gap:2px">Imagen (JPG o PNG)<input type="file" name="img" accept="image/*" required ${w}></label>
+            <button class="btn" type="submit" ${w}>Subir mapa</button>
+            <p class="ui muted" style="font-size:12px;margin:0">Se guarda en vuestra base de datos protegida, igual que los mapas grandes. Vale para todos los años.</p></form></details>`}
+    </section>`;
   }
   return `${info}
     <section class="panel"><h3>Leyenda · ${esc(m.nombre)} · año ${domAnio()}</h3>
@@ -1356,9 +1438,10 @@ function draw() {
     ctx.beginPath(); for (const k of porColor[c]) { const [cc, rr] = k.split('_').map(Number); hexPath(ctx, g, cc, rr); }
     ctx.globalAlpha = 0.45; ctx.fillStyle = c; ctx.fill(); ctx.globalAlpha = 0.95; ctx.strokeStyle = c; ctx.lineWidth = 2.5 * lw; ctx.stroke(); ctx.globalAlpha = 1;
   }
-  const notas = notasDe(m.id);
-  for (const k in notas) { const [cc, rr] = k.split('_').map(Number); const [cx, cy] = centro(g, cc, rr);
-    ctx.beginPath(); ctx.arc(cx, cy - g.dy * 0.22, Math.max(4 * lw, g.dy * 0.09), 0, Math.PI * 2); ctx.fillStyle = '#f5ecd2'; ctx.fill(); ctx.lineWidth = 2 * lw; ctx.strokeStyle = '#2a2024'; ctx.stroke(); }
+  const notas = notasDe(m.id), planos = planosDe(m.id);
+  for (const k of new Set([...Object.keys(notas), ...Object.keys(planos)])) { const [cc, rr] = k.split('_').map(Number); const [cx, cy] = centro(g, cc, rr);
+    const r = Math.max(4 * lw, g.dy * 0.09) * (planos[k] ? 1.3 : 1);
+    ctx.beginPath(); ctx.arc(cx, cy - g.dy * 0.22, r, 0, Math.PI * 2); ctx.fillStyle = planos[k] ? '#e0a91c' : '#f5ecd2'; ctx.fill(); ctx.lineWidth = 2 * lw; ctx.strokeStyle = '#2a2024'; ctx.stroke(); }
   for (const k of [M.hover, M.info]) { if (!k) continue; const [cc, rr] = k.split('_').map(Number);
     ctx.beginPath(); hexPath(ctx, g, cc, rr); ctx.lineWidth = 3 * lw; ctx.strokeStyle = k === M.info ? '#ffffff' : '#141014'; ctx.stroke(); }
 }
@@ -1403,7 +1486,7 @@ function bindMapa() {
     cv().setPointerCapture(ev.pointerId); M.ptrs.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
     if (M.ptrs.size === 2) { M.trazo = null; const [a, b] = [...M.ptrs.values()]; M.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; return; }
     const pan = M.tool === 'mover' || ev.button === 1 || ev.button === 2;
-    if (pan) { M.arrastre = { x: ev.clientX, y: ev.clientY }; $('#map-wrap').classList.add('dragging'); return; }
+    if (pan) { M.arrastre = { x: ev.clientX, y: ev.clientY, x0: ev.clientX, y0: ev.clientY, clic: M.tool === 'mover' && ev.button === 0 }; $('#map-wrap').classList.add('dragging'); return; }
     const key = claveEn(m, ev); if (!key) return;
     if (M.tool === 'info') { M.info = key; schedule(); return; }
     if (!guard()) return;
@@ -1416,18 +1499,22 @@ function bindMapa() {
       const [a, b] = [...M.ptrs.values()], d = Math.hypot(a.x - b.x, a.y - b.y), x = (a.x + b.x) / 2, y = (a.y + b.y) / 2, r = c.getBoundingClientRect(), v = vista(m);
       v.tx += x - M.pinch.x; v.ty += y - M.pinch.y; zoomEn(m, d / M.pinch.d, x - r.left, y - r.top); M.pinch = { d, x, y }; return;
     }
-    if (M.arrastre) { const v = vista(m); v.tx += ev.clientX - M.arrastre.x; v.ty += ev.clientY - M.arrastre.y; M.arrastre = { x: ev.clientX, y: ev.clientY }; draw(); return; }
+    if (M.arrastre) { const v = vista(m); v.tx += ev.clientX - M.arrastre.x; v.ty += ev.clientY - M.arrastre.y; M.arrastre.x = ev.clientX; M.arrastre.y = ev.clientY;
+      if (Math.hypot(ev.clientX - M.arrastre.x0, ev.clientY - M.arrastre.y0) > 5) M.arrastre.clic = false; draw(); return; }
     if (ev.target !== c) { if (M.hover) { M.hover = null; $('#map-tip').hidden = true; draw(); } return; }
     const key = claveEn(m, ev);
     if (M.trazo) pintar(m, key);
     if (key !== M.hover) { M.hover = key; draw(); }
     const tip = $('#map-tip'), cel = key ? celdasDe(m.id)[key] : null, nota = key ? notasDe(m.id)[key] : null, b = bandos().find(x => x.id === cel);
-    if (key && (b || nota)) { const r = c.getBoundingClientRect(); tip.textContent = [b && b.nombre, nota].filter(Boolean).join(' · ').slice(0, 90); tip.hidden = false;
+    const pl = key ? planosDe(m.id)[key] : null;
+    if (key && (b || nota || pl)) { const r = c.getBoundingClientRect(); tip.textContent = [b && b.nombre, nota, pl && `mapa: ${pl.nombre}`].filter(Boolean).join(' · ').slice(0, 90); tip.hidden = false;
       tip.style.left = Math.min(ev.clientX - r.left + 14, r.width - 160) + 'px'; tip.style.top = (ev.clientY - r.top + 14) + 'px'; } else tip.hidden = true;
   });
   const fin = ev => {
     M.ptrs.delete(ev.pointerId); if (M.ptrs.size < 2) M.pinch = null;
-    if (M.arrastre) { M.arrastre = null; const w = $('#map-wrap'); if (w) w.classList.remove('dragging'); }
+    if (M.arrastre) { const a = M.arrastre; M.arrastre = null; const w = $('#map-wrap'); if (w) w.classList.remove('dragging');
+      // a plain click (no drag) with Mover on a note that has a map opens it
+      const m = mapaSel(); if (a.clic && ev.type === 'pointerup' && m) { const k = claveEn(m, ev); if (k && planosDe(m.id)[k]) abrirPlano(m.id, k); } }
     if (M.trazo && M.ptrs.size === 0) { const t = M.trazo; M.trazo = null; if (t.n) { const m = mapas().find(x => x.id === t.mapa), b = bandos().find(x => x.id === t.bando);
       log(t.tool === 'borrar' ? `borró ${t.n} ${t.n === 1 ? 'hexágono' : 'hexágonos'} en el mapa de ${m ? m.nombre : t.mapa} (año ${t.anio})` : `pintó ${t.n} ${t.n === 1 ? 'hexágono' : 'hexágonos'} de «${b ? b.nombre : t.bando}» en el mapa de ${m ? m.nombre : t.mapa} (año ${t.anio})`); } }
   };
@@ -1435,19 +1522,21 @@ function bindMapa() {
   document.addEventListener('wheel', ev => { const c = cv(); if (ev.target !== c) return; ev.preventDefault(); const m = mapaSel(); if (!m) return; const r = c.getBoundingClientRect();
     zoomEn(m, Math.exp(-ev.deltaY * 0.0015), ev.clientX - r.left, ev.clientY - r.top); }, { passive: false });
   document.addEventListener('contextmenu', ev => { if (ev.target === cv()) ev.preventDefault(); });
+  // note map viewer: drag with the mouse to scroll (touch scrolls natively), wheel to zoom
+  let pa = null;
+  document.addEventListener('pointerdown', ev => { const b = ev.target.closest && ev.target.closest('#plano-body'); if (!b || ev.pointerType === 'touch') return;
+    ev.preventDefault(); pa = { x: ev.clientX, y: ev.clientY, l: b.scrollLeft, t: b.scrollTop }; b.classList.add('dragging'); });
+  document.addEventListener('pointermove', ev => { const b = $('#plano-body'); if (!pa || !b) return; b.scrollLeft = pa.l - (ev.clientX - pa.x); b.scrollTop = pa.t - (ev.clientY - pa.y); });
+  document.addEventListener('pointerup', () => { if (pa) { pa = null; const b = $('#plano-body'); if (b) b.classList.remove('dragging'); } });
+  document.addEventListener('wheel', ev => { if (!ev.target.closest || !ev.target.closest('#plano-body')) return; ev.preventDefault(); zoomPlano(Math.exp(-ev.deltaY * 0.0015)); }, { passive: false });
   window.addEventListener('resize', () => draw());
 }
 async function subirMapa(nombre, file) {
   const id = slug(nombre); if (mapas().some(m => m.id === id)) { toast('Ya hay un mapa con ese nombre.'); throw 'skip'; }
   toast('Preparando la imagen…');
-  const url = URL.createObjectURL(file), img = await new Promise((ok, ko) => { const i = new Image(); i.onload = () => ok(i); i.onerror = ko; i.src = url; });
-  const k = Math.min(1, MAX_IMG / img.naturalWidth), w = Math.round(img.naturalWidth * k), h = Math.round(img.naturalHeight * k);
-  const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(img, 0, 0, w, h);
-  const b64 = c.toDataURL('image/jpeg', 0.7).split(',')[1]; URL.revokeObjectURL(url);
-  const n = Math.ceil(b64.length / TROZO);
-  for (let i = 0; i < n; i++) await db.doc(`mapatrozos/${id}-${i}`).set({ mapa: id, i, d: b64.slice(i * TROZO, (i + 1) * TROZO) });
+  const { ancho: W, alto: H, trozos: n } = await subirImagen(id, file);
   // starting grid: 40 regular flat-top columns across; the owner fine-tunes it afterwards
-  const W = img.naturalWidth, H = img.naturalHeight, dx = r6(W / 40), lado = dx / 1.5, dy = r6(lado * Math.sqrt(3));
+  const dx = r6(W / 40), lado = dx / 1.5, dy = r6(lado * Math.sqrt(3));
   await db.doc(`mapas/${id}`).set({ nombre, ancho: W, alto: H, tipo: 'image/jpeg', trozos: n, orden: mapas().length + 1, escala: '',
     grid: { x0: r6(lado), y0: r6(dy / 2), dx, dy, impar: 1 } });
   M.sel = id; store.set('mapa', id); M.rejilla = true;
