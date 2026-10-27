@@ -1090,12 +1090,14 @@ const ACTS = {
   mapa(b) { M.sel = b.dataset.id; store.set('mapa', M.sel); M.info = null; M.hover = null; schedule(); },
   bando(b) { M.bando = b.dataset.id; store.set('bando', M.bando); if (M.tool === 'mover' || M.tool === 'info') M.tool = 'pintar'; schedule(); },
   cerrarinfo() { M.info = null; schedule(); },
+  domanio(b) { M.anio = +b.dataset.y === actual() ? null : +b.dataset.y; M.hover = null; schedule(); },
   delbando(b) { if (!guard()) return; const bs = bandos(), x = bs.find(z => z.id === b.dataset.id); if (!x) return;
     confirmClick(b, () => setDoc('reglas/leyenda', { bandos: bs.filter(z => z.id !== x.id) }).then(() => log(`quitó el color «${x.nombre}» de la leyenda del dominio`)).catch(() => {})); },
   delmapa(b) { if (!guard() || !esDueno) return; const m = mapas().find(x => x.id === b.dataset.id); if (!m) return;
     confirmClick(b, async () => { try {
       const tz = await db.collection('mapatrozos').where('mapa', '==', m.id).get(); const batch = db.batch();
-      tz.docs.forEach(d => batch.delete(d.ref)); batch.delete(db.doc(`mapas/${m.id}`)); batch.delete(db.doc(`dominio/${m.id}`)); await batch.commit();
+      tz.docs.forEach(d => batch.delete(d.ref)); batch.delete(db.doc(`mapas/${m.id}`)); batch.delete(db.doc(`dominio/${m.id}`));
+      aniosDom(m.id).forEach(y => batch.delete(db.doc(`dominio/${domDoc(m.id, y)}`))); await batch.commit();
       delete M.img[m.id]; M.sel = null; log(`borró el mapa «${m.nombre}»`); toast('Mapa borrado.');
     } catch (e) { toast(errMsg(e)); } }); },
   year(b) { V.year[b.dataset.c] = +b.dataset.y; schedule(); },
@@ -1153,13 +1155,14 @@ async function avanzarCampana() {
       if (cur !== a) return false; tx.set(ref, { anio: n }, { merge: true }); return true;
     });
     if (!ok) { toast('Otra persona acaba de cambiar el año de la campaña.'); return; }
+    await guardarAnioDominio(a);
     for (const c of ['poblacion', 'ganado', 'tierras', 'mina']) {
       const prev = S[c][a]; if (!prev) continue;
       if (S[c][n]) { if (c === 'mina') await upd(`mina/y${n}`, { inicial: finMina(prev) }); continue; }
       const nref = db.doc(`${c}/y${n}`), data = siguiente(c, prev, n);
       await db.runTransaction(async tx => { const s = await tx.get(nref); if (!s.exists) tx.set(nref, data); });
     }
-    V.year = {};
+    V.year = {}; M.anio = null;
     log(`pasó la campaña del año ${a} al año ${n}`); toast(`La campaña está ahora en el año ${n}.`);
   } catch (e) { toast(errMsg(e)); }
 }
@@ -1170,7 +1173,7 @@ function campanaPanel() {
   return `<section class="panel"><h3>Campaña</h3>
     <p class="ui" style="margin:0">Estáis jugando el <b>año ${a}</b>.${hasta ? ` Hay planes ya calculados hasta el año ${hasta}; se activan solos al llegar a cada año.` : ''}</p>
     ${esDueno ? `<button class="btn seal" style="margin-top:12px" data-act="campana" data-needs-write>Pasar al año ${a + 1}</button>
-      <p class="ui muted" style="font-size:12px;margin:8px 0 0">Cierra el año ${a} y abre el ${a + 1} en población, ganado, tierras y mina. Pulsa dos veces para confirmar.</p>` : ''}
+      <p class="ui muted" style="font-size:12px;margin:8px 0 0">Cierra el año ${a} y abre el ${a + 1} en población, ganado, tierras y mina, y guarda cómo queda el dominio en el año ${a}. Pulsa dos veces para confirmar.</p>` : ''}
   </section>`;
 }
 
@@ -1179,6 +1182,9 @@ function campanaPanel() {
 // into base64 chunks in `mapatrozos` (Firestore docs max 1 MB). Painted hexes and notes live in
 // `dominio/<id>` as { celdas: {"c_r": bandoId}, notas: {"c_r": text} }. Flat-top hexes,
 // "odd-q" layout: column c centre x = x0 + c·dx; odd columns sit half a row lower.
+// Painted hexes are kept per campaign year in `dominio/<id>__y<año>` ({ mapa, anio, celdas }),
+// reusing the same image. A year nobody has painted yet shows the closest earlier year (or the
+// old undated `celdas` of `dominio/<id>`); its first stroke copies that state into its own doc.
 const BANDOS_DEF = [
   { id: 'inquisicion', nombre: 'La Inquisición', color: '#f2c214' }, // Lathander's dawn gold
   { id: 'aliados', nombre: 'Aliados', color: '#7a55b0' },
@@ -1189,7 +1195,7 @@ const BANDOS_DEF = [
 ];
 const MAX_IMG = 3000, TROZO = 800000;
 const M = { sel: store.get('mapa', null), img: {}, cargando: {}, pend: {}, flushT: null, tool: 'mover', bando: store.get('bando', 'inquisicion'),
-  vistas: {}, hover: null, info: null, rejilla: false, trazo: null, ptrs: new Map(), pinch: null };
+  vistas: {}, hover: null, info: null, rejilla: false, trazo: null, ptrs: new Map(), pinch: null, anio: null, creados: new Set() };
 const bandos = () => (S.leyenda && Array.isArray(S.leyenda.bandos) && S.leyenda.bandos.length) ? S.leyenda.bandos : BANDOS_DEF;
 const mapas = () => [...(S.mapas || [])].sort((a, b) => (a.orden || 0) - (b.orden || 0) || String(a.nombre).localeCompare(b.nombre));
 const mapaSel = () => { const ms = mapas(); return ms.find(m => m.id === M.sel) || ms[0] || null; };
@@ -1209,8 +1215,19 @@ function celdaEn(g, wx, wy) {
   }
   return best;
 }
-function celdasDe(id) {
-  const base = { ...((S.dominio[id] || {}).celdas || {}) }, p = M.pend[id] || {};
+const DOM_Y = '__y', domDoc = (id, y) => id + DOM_Y + y;
+const domAnio = () => M.anio != null ? M.anio : actual();
+const aniosDom = id => Object.keys(S.dominio).filter(k => k.startsWith(id + DOM_Y)).map(k => +k.slice(id.length + DOM_Y.length)).filter(Number.isFinite).sort((a, b) => a - b);
+// the year whose saved state year y shows (y itself once painted), or null for the undated base
+const origenDom = (id, y) => { const ys = aniosDom(id).filter(v => v <= y); return ys.length ? ys[ys.length - 1] : null; };
+const celdasBase = (id, y) => { const o = origenDom(id, y); return ((o == null ? S.dominio[id] : S.dominio[domDoc(id, o)]) || {}).celdas || {}; };
+function aniosSelector(id) {
+  const s = new Set([actual(), domAnio(), ...aniosDom(id)]);
+  for (const c of ['poblacion', 'ganado', 'tierras', 'mina']) years(c).forEach(y => s.add(y));
+  return [...s].sort((a, b) => a - b);
+}
+function celdasDe(id, y = domAnio()) {
+  const base = { ...celdasBase(id, y) }, p = M.pend[domDoc(id, y)] || {};
   for (const k in p) base[k] = p[k];
   for (const k in base) if (!base[k]) delete base[k];
   return base;
@@ -1237,10 +1254,11 @@ async function cargarImagen(m) {
 
 function domShell() {
   return `<div class="sheet" id="dom-root">
-    <div class="head" style="margin-bottom:0"><div><h2>Dominio</h2><p>Pinta los hexágonos que controla la Orden. Elige un color de la leyenda y haz clic o arrastra sobre el mapa; todos lo veis al momento.</p></div></div>
+    <div class="head" style="margin-bottom:0"><div><h2>Dominio</h2><p>Pinta los hexágonos que controla la Orden. Elige un color de la leyenda y haz clic o arrastra sobre el mapa; todos lo veis al momento. Cada año guarda su propio territorio: elige el año arriba del mapa.</p></div></div>
     <div class="subtabs" id="dom-mapas" role="tablist" aria-label="Mapas"></div>
     <div class="dom">
       <div style="min-width:0">
+        <div class="years" id="dom-anios" style="margin-bottom:10px"></div>
         <div class="dom-bar" id="dom-bar"></div>
         <div class="map-wrap" id="map-wrap"><canvas id="mapa-cv" aria-label="Mapa del dominio"></canvas><div class="map-msg" id="map-msg"></div><div class="map-tip" id="map-tip" hidden></div></div>
         <p class="kbd" style="margin:8px 0 0">Rueda del ratón: zoom · Mover: arrastra el mapa · Pintar o Borrar: clic o arrastra · En el móvil, dos dedos para mover y hacer zoom.</p>
@@ -1252,6 +1270,8 @@ function domShell() {
 function domUpdate() {
   const m = mapaSel(); const ms = mapas();
   $('#dom-mapas').innerHTML = ms.map(x => `<button class="subtab" role="tab" data-act="mapa" data-id="${esc(x.id)}" aria-selected="${!!(m && x.id === m.id)}">${esc(x.nombre)}${x.escala ? `<small>${esc(x.escala)}</small>` : ''}</button>`).join('');
+  const ya = domAnio();
+  $('#dom-anios').innerHTML = m ? '<span>Año</span>' + aniosSelector(m.id).map(y => `<button class="chip ${esPlan(y) ? 'plan' : ''}" data-act="domanio" data-y="${y}" aria-pressed="${y === ya}" title="${esPlan(y) ? 'Planificado' : y === actual() ? 'Año en curso' : 'Año cerrado'}">${y}</button>`).join('') : '';
   const t = (k, n) => `<button class="btn tool" data-act="tool" data-t="${k}" aria-pressed="${M.tool === k}">${n}</button>`;
   $('#dom-bar').innerHTML = m ? `${t('mover', 'Mover')}${t('pintar', 'Pintar')}${t('borrar', 'Borrar')}${t('info', 'Notas')}<span class="sep"></span>
     <button class="btn ghost" data-act="zoom" data-z="1.4" aria-label="Acercar">+</button><button class="btn ghost" data-act="zoom" data-z="0.714" aria-label="Alejar">−</button>
@@ -1277,7 +1297,8 @@ function domSide(m) {
       <div style="display:flex;gap:8px"><button class="btn" type="submit" ${w}>Guardar nota</button><button class="btn ghost" type="button" data-act="cerrarinfo">Cerrar</button></div></form></section>`;
   }
   return `${info}
-    <section class="panel"><h3>Leyenda · ${esc(m.nombre)}</h3>
+    <section class="panel"><h3>Leyenda · ${esc(m.nombre)} · año ${domAnio()}</h3>
+      ${(() => { const y = domAnio(), o = origenDom(m.id, y); return o === y ? '' : `<p class="ui muted" style="font-size:13px;margin:0 0 8px">Este año aún no tiene cambios propios: muestra ${o == null ? 'el territorio inicial' : `lo del año ${o}`}. Al pintar se guarda como año ${y} sin tocar los anteriores.</p>`; })()}
       <ul class="ley" role="listbox" aria-label="Color para pintar">${bs.map(b => `<li role="option" data-act="bando" data-id="${esc(b.id)}" aria-selected="${b.id === M.bando}">
         <input type="color" id="i-ley-${esc(b.id)}-color" data-bind="ley" data-a="${esc(b.id)}" data-b="color" value="${esc(b.color)}" aria-label="Color de ${esc(b.nombre)}" ${w}>
         <input class="txt" id="i-ley-${esc(b.id)}-nombre" data-bind="ley" data-a="${esc(b.id)}" data-b="nombre" value="${esc(b.nombre)}" aria-label="Nombre" ${w}>
@@ -1346,16 +1367,33 @@ function aMundo(m, ev) { const r = $('#mapa-cv').getBoundingClientRect(), v = vi
 function claveEn(m, ev) { const [wx, wy] = aMundo(m, ev); if (wx < 0 || wy < 0 || wx > m.ancho || wy > m.alto) return null; const cr = celdaEn(m.grid, wx, wy); return cr ? cr[0] + '_' + cr[1] : null; }
 function zoomEn(m, f, sx, sy) { const v = vista(m); const ns = Math.min(Math.max(v.s * f, 0.02), 4); const k = ns / v.s; v.tx = sx - (sx - v.tx) * k; v.ty = sy - (sy - v.ty) * k; v.s = ns; draw(); }
 function pintar(m, key) {
-  if (!key || !M.trazo) return; const val = M.tool === 'borrar' ? null : M.bando;
-  const actual = celdasDe(m.id)[key] || null; if (actual === val || M.trazo.vistos.has(key)) return;
+  if (!key || !M.trazo) return; const val = M.tool === 'borrar' ? null : M.bando, y = M.trazo.anio;
+  const actual = celdasDe(m.id, y)[key] || null; if (actual === val || M.trazo.vistos.has(key)) return;
   M.trazo.vistos.add(key); M.trazo.n++;
-  (M.pend[m.id] = M.pend[m.id] || {})[key] = val; draw();
-  clearTimeout(M.flushT); M.flushT = setTimeout(() => volcar(m.id), 350);
+  const d = domDoc(m.id, y); (M.pend[d] = M.pend[d] || {})[key] = val; draw();
+  clearTimeout(M.flushT); M.flushT = setTimeout(volcarTodo, 350);
 }
-function volcar(id) {
-  const p = M.pend[id]; if (!p || !Object.keys(p).length) return; const lote = { ...p };
-  upd(`dominio/${id}`, { celdas: lote }).then(() => { const cur = M.pend[id] || {}; for (const k in lote) if (cur[k] === lote[k]) delete cur[k]; draw(); })
-    .catch(() => { M.pend[id] = {}; schedule(); });
+const volcarTodo = () => Promise.all(Object.keys(M.pend).map(volcar));
+function volcar(doc) {
+  const p = M.pend[doc]; if (!p || !Object.keys(p).length) return; const lote = { ...p };
+  const i = doc.lastIndexOf(DOM_Y), id = doc.slice(0, i), y = +doc.slice(i + DOM_Y.length);
+  let data = { celdas: lote };
+  if (!S.dominio[doc] && !M.creados.has(doc)) {
+    // first change of this year: copy what it showed so far, and freeze the following year
+    // (if it is already closed) so it keeps showing what it showed before
+    const base = celdasBase(id, y); M.creados.add(doc);
+    data = { mapa: id, anio: y, celdas: { ...base, ...lote } };
+    const sig = domDoc(id, y + 1);
+    if (y < actual() && !S.dominio[sig] && !M.creados.has(sig)) { M.creados.add(sig); upd(`dominio/${sig}`, { mapa: id, anio: y + 1, celdas: { ...base } }).catch(() => {}); }
+  }
+  return upd(`dominio/${doc}`, data).then(() => { const cur = M.pend[doc] || {}; for (const k in lote) if (cur[k] === lote[k]) delete cur[k]; draw(); })
+    .catch(() => { M.creados.delete(doc); M.pend[doc] = {}; schedule(); });
+}
+// saves the closing year of every map as its own snapshot (called when the campaign advances)
+async function guardarAnioDominio(y) {
+  clearTimeout(M.flushT); await volcarTodo().catch(() => {});
+  for (const m of mapas()) { const d = domDoc(m.id, y); if (S.dominio[d] || M.creados.has(d)) continue;
+    M.creados.add(d); await upd(`dominio/${d}`, { mapa: m.id, anio: y, celdas: { ...celdasBase(m.id, y) } }); }
 }
 function bindMapa() {
   domUpdate.bound = true;
@@ -1369,7 +1407,7 @@ function bindMapa() {
     const key = claveEn(m, ev); if (!key) return;
     if (M.tool === 'info') { M.info = key; schedule(); return; }
     if (!guard()) return;
-    M.trazo = { n: 0, vistos: new Set(), tool: M.tool, bando: M.bando, mapa: m.id }; pintar(m, key);
+    M.trazo = { n: 0, vistos: new Set(), tool: M.tool, bando: M.bando, mapa: m.id, anio: domAnio() }; pintar(m, key);
   });
   document.addEventListener('pointermove', ev => {
     const m = mapaSel(); const c = cv(); if (!m || !c) return;
@@ -1391,7 +1429,7 @@ function bindMapa() {
     M.ptrs.delete(ev.pointerId); if (M.ptrs.size < 2) M.pinch = null;
     if (M.arrastre) { M.arrastre = null; const w = $('#map-wrap'); if (w) w.classList.remove('dragging'); }
     if (M.trazo && M.ptrs.size === 0) { const t = M.trazo; M.trazo = null; if (t.n) { const m = mapas().find(x => x.id === t.mapa), b = bandos().find(x => x.id === t.bando);
-      log(t.tool === 'borrar' ? `borró ${t.n} ${t.n === 1 ? 'hexágono' : 'hexágonos'} en el mapa de ${m ? m.nombre : t.mapa}` : `pintó ${t.n} ${t.n === 1 ? 'hexágono' : 'hexágonos'} de «${b ? b.nombre : t.bando}» en el mapa de ${m ? m.nombre : t.mapa}`); } }
+      log(t.tool === 'borrar' ? `borró ${t.n} ${t.n === 1 ? 'hexágono' : 'hexágonos'} en el mapa de ${m ? m.nombre : t.mapa} (año ${t.anio})` : `pintó ${t.n} ${t.n === 1 ? 'hexágono' : 'hexágonos'} de «${b ? b.nombre : t.bando}» en el mapa de ${m ? m.nombre : t.mapa} (año ${t.anio})`); } }
   };
   document.addEventListener('pointerup', fin); document.addEventListener('pointercancel', fin);
   document.addEventListener('wheel', ev => { const c = cv(); if (ev.target !== c) return; ev.preventDefault(); const m = mapaSel(); if (!m) return; const r = c.getBoundingClientRect();
