@@ -167,6 +167,26 @@ details.adder[open] > summary::before { content: "− " }
 .goals li:last-child { border-bottom: 0 }
 .goals input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--blood) }
 .goals .done .t { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--blood) }
+/* hierarchy: org chart drawn with nested lists; the connectors are the li/ul pseudo-elements */
+.arbol { overflow-x: auto; padding: 8px 0 18px }
+.arbol ul { display: flex; justify-content: center; list-style: none; margin: 0; padding: 22px 0 0; position: relative }
+.arbol > ul { padding-top: 0; width: max-content; min-width: 100% }
+.arbol li { position: relative; display: flex; flex-direction: column; align-items: center; padding: 22px 8px 0 }
+.arbol li::before, .arbol li::after { content: ""; position: absolute; top: 0; right: 50%; width: 50%; height: 22px; border-top: 2px solid var(--line) }
+.arbol li::after { right: auto; left: 50%; border-left: 2px solid var(--line) }
+.arbol li:only-child { padding-top: 0 }
+.arbol li:only-child::before, .arbol li:only-child::after { display: none }
+.arbol li:first-child::before, .arbol li:last-child::after { border: 0 }
+.arbol li:last-child::before { border-right: 2px solid var(--line); border-radius: 0 6px 0 0 }
+.arbol li:first-child::after { border-radius: 6px 0 0 0 }
+.arbol ul ul::before { content: ""; position: absolute; top: 0; left: 50%; height: 22px; border-left: 2px solid var(--line) }
+.jcard { background: var(--panel); border: 1px solid var(--line); color: var(--ink); padding: 10px 16px; min-width: 150px; max-width: 230px; text-align: center; cursor: pointer; font: inherit }
+.jcard:hover { border-color: var(--gold) }
+.jcard[aria-pressed="true"] { outline: 2px solid var(--blood); outline-offset: 2px }
+.jcard .c { display: block; font-family: var(--f-ui); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--gold) }
+.jcard .n { display: block; font-family: var(--f-display); font-size: 22px; line-height: 1.15; margin-top: 2px }
+.jcard.cima { border: 2px solid var(--gold); background: var(--gold-soft); padding: 14px 22px }
+.jcard.cima .n { font-size: 28px }
 .tag { font-family: var(--f-ui); font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap }
 .progress { height: 6px; background: var(--line-soft); margin-top: 8px; position: relative; max-width: 360px }
 .progress i { position: absolute; inset: 0 auto 0 0; background: var(--blood) }
@@ -336,7 +356,7 @@ const MINERALES = [
 const EFICACIA = { goblins: 0.04, humanos: 0.1, enanos: 0.2 };
 const TABS = [
   ['resumen','Resumen'],['dominio','Dominio'],['poblacion','Población'],['ganado','Ganado'],['tierras','Tierras'],
-  ['mina','Mina'],['tesoro','Tesoro'],['cronica','Crónica'],['objetivos','Objetivos'],
+  ['mina','Mina'],['tesoro','Tesoro'],['cronica','Crónica'],['objetivos','Objetivos'],['jerarquia','Jerarquía'],
 ];
 
 /* ---------- helpers ---------- */
@@ -375,8 +395,8 @@ function hace(ts) {
 
 /* ---------- state ---------- */
 const S = { poblacion: {}, ganado: {}, tierras: {}, mina: {}, monedas: [], gemas: [], objetos: [], cronica: [], objetivos: [], registro: [], ready: {},
-  mapas: [], dominio: {}, leyenda: null };
-const V = { tab: 'resumen', year: {}, filtro: store.get('filtro', []), editEv: null };
+  mapas: [], dominio: {}, leyenda: null, jerarquia: null };
+const V = { tab: 'resumen', year: {}, filtro: store.get('filtro', []), editEv: null, jsel: null };
 let db = null, user = null, room = null, myId = null, canWrite = true, connected = false;
 let auth = null, me = null, authReady = false, esDueno = false, miembro = null, acceso = null;
 const CFG = window.FIREBASE_CONFIG || null;
@@ -947,6 +967,52 @@ VIEWS.objetivos = () => {
   </div>`;
 };
 
+/* ---------- jerarquía ---------- */
+// One document, reglas/jerarquia: { personas: { id: { nombre, cargo, padre: id|null, orden } } }.
+// Until someone edits it, the page shows the court as the group described it.
+const JERARQUIA_DEF = {
+  lander: { nombre: 'Lander', cargo: 'Señor Inquisidor y Rey de Barovia', padre: null, orden: 1 },
+  wachter: { nombre: 'Lady Wachter', cargo: 'Regente', padre: 'lander', orden: 1 },
+  luna: { nombre: 'Luna Lizanima', cargo: 'Gestora de la Fe', padre: 'lander', orden: 2 },
+  marlok: { nombre: 'Marlok', cargo: 'Máximo Comandante de los Ejércitos', padre: 'lander', orden: 3 },
+  kasparov: { nombre: 'Moldav Kasparov', cargo: 'General', padre: 'marlok', orden: 1 },
+  donavich: { nombre: 'Padre Donavich', cargo: '', padre: 'luna', orden: 1 },
+};
+function personasJ() { const o = {}, src = S.jerarquia ? S.jerarquia.personas || {} : JERARQUIA_DEF; for (const k in src) if (src[k] && src[k].nombre) o[k] = src[k]; return o; }
+const hijosJ = (ps, padre) => Object.keys(ps).filter(k => (ps[k].padre && ps[ps[k].padre] ? ps[k].padre : null) === padre)
+  .sort((a, b) => (ps[a].orden || 0) - (ps[b].orden || 0) || ps[a].nombre.localeCompare(ps[b].nombre));
+// the first write stores the whole default court, so the doc never holds only part of it
+function guardarJ(cambio) {
+  if (S.jerarquia) return upd('reglas/jerarquia', { personas: cambio });
+  const todo = { ...JERARQUIA_DEF }; for (const k in cambio) todo[k] = cambio[k] && { ...todo[k], ...cambio[k] };
+  return upd('reglas/jerarquia', { personas: todo });
+}
+// ids that may not be chosen as boss of id: itself and everyone under it
+function bajoJ(ps, id) { const s = new Set([id]); let n = -1; while (s.size !== n) { n = s.size; for (const k in ps) if (s.has(ps[k].padre)) s.add(k); } return s; }
+VIEWS.jerarquia = () => {
+  const ps = personasJ(), sel = ps[V.jsel] ? V.jsel : null;
+  const rama = (ids, nivel) => `<ul>${ids.map(k => { const p = ps[k], h = hijosJ(ps, k);
+    return `<li><button class="jcard ${nivel === 0 ? 'cima' : ''}" data-act="jsel" data-id="${esc(k)}" aria-pressed="${k === sel}">
+      ${p.cargo ? `<span class="c">${esc(p.cargo)}</span>` : ''}<span class="n">${esc(p.nombre)}</span></button>${h.length ? rama(h, nivel + 1) : ''}</li>`; }).join('')}</ul>`;
+  const raices = hijosJ(ps, null);
+  const opciones = (excluir, actual) => '<option value="">— Nadie (arriba del todo) —</option>' + Object.keys(ps).filter(k => !excluir.has(k))
+    .sort((a, b) => ps[a].nombre.localeCompare(ps[b].nombre)).map(k => `<option value="${esc(k)}" ${k === actual ? 'selected' : ''}>${esc(ps[k].nombre)}${ps[k].cargo ? ' · ' + esc(ps[k].cargo) : ''}</option>`).join('');
+  const p = sel && ps[sel];
+  return `<div class="sheet">
+    <div class="head"><div><h2>Jerarquía de la Orden</h2><p>Quién manda sobre quién en la Inquisición y en Barovia. Haz clic en una persona para cambiar su nombre, su cargo o de quién depende.</p></div></div>
+    <div class="arbol">${raices.length ? rama(raices, 0) : '<p class="empty">Todavía no hay nadie en la jerarquía.</p>'}</div>
+    ${p ? `<form class="add" data-form="jer"><label class="grow">Nombre<input name="nombre" id="j-nombre" required maxlength="60" value="${esc(p.nombre)}"></label>
+      <label class="grow">Cargo<input name="cargo" id="j-cargo" maxlength="80" value="${esc(p.cargo || '')}" placeholder="p. ej. Capitán de la guardia"></label>
+      <label>Depende de<select name="padre" id="j-padre">${opciones(bajoJ(ps, sel), p.padre)}</select></label>
+      <button class="btn seal" type="submit">Guardar</button>${delBtn('deljer', sel, 'Quitar')}<button class="btn ghost" type="button" data-act="jsel" data-id="">Cerrar</button></form>` : ''}
+    <details class="adder" id="jer-add" style="margin-top:14px"><summary>Añadir a alguien</summary>
+      <form class="add" data-form="jadd" style="margin-top:8px"><label class="grow">Nombre<input name="nombre" id="ja-nombre" required maxlength="60" placeholder="Ismark Kolyanovich"></label>
+        <label class="grow">Cargo<input name="cargo" id="ja-cargo" maxlength="80" placeholder="Burgomaestre de Vallaki"></label>
+        <label>Depende de<select name="padre" id="ja-padre">${opciones(new Set(), sel || raices[0])}</select></label>
+        <button class="btn seal" type="submit">Añadir</button></form></details>
+  </div>`;
+};
+
 function emptyView(t, msg) { return `<div class="sheet"><div class="head"><h2>${t}</h2></div><p class="empty">${msg}</p></div>`; }
 
 /* ---------- bindings (inline edits) ---------- */
@@ -1051,6 +1117,22 @@ const FORMS = {
     await upd(`dominio/${m.id}`, { planos: { [k]: { id, nombre, ...info } } });
     log(`puso el mapa «${nombre}» en la nota del hexágono ${c}, ${r} de ${m.nombre}`); abrirPlano(m.id, k);
   },
+  jer(fd) {
+    const ps = personasJ(), id = V.jsel, p = ps[id]; if (!p) return Promise.reject('skip');
+    const nombre = String(fd.get('nombre') || '').trim().slice(0, 60), cargo = String(fd.get('cargo') || '').trim().slice(0, 80), padre = fd.get('padre') || null;
+    if (!nombre) { toast('Escribe un nombre.'); return Promise.reject('skip'); }
+    if (padre && (bajoJ(ps, id).has(padre) || !ps[padre])) { toast('No puede depender de sí mismo ni de alguien que está por debajo.'); return Promise.reject('skip'); }
+    const antes = p.padre && ps[p.padre] ? p.padre : null, cambio = { nombre, cargo, padre };
+    if (padre !== antes) cambio.orden = Math.max(0, ...hijosJ(ps, padre).map(k => ps[k].orden || 0)) + 1;
+    return guardarJ({ [id]: cambio }).then(() => log(`cambió en la jerarquía a ${p.nombre}${p.nombre !== nombre ? ` (ahora «${nombre}»)` : ''}${cargo ? `: ${cargo}` : ''}${padre !== antes ? `, ahora depende de ${padre ? ps[padre].nombre : 'nadie'}` : ''}`));
+  },
+  jadd(fd) {
+    const ps = personasJ(), nombre = String(fd.get('nombre') || '').trim().slice(0, 60), cargo = String(fd.get('cargo') || '').trim().slice(0, 80);
+    const padre = ps[fd.get('padre')] ? fd.get('padre') : null; if (!nombre) return Promise.reject('skip');
+    let id = slug(nombre); while (ps[id]) id += '-2';
+    const orden = Math.max(0, ...hijosJ(ps, padre).map(k => ps[k].orden || 0)) + 1;
+    return guardarJ({ [id]: { nombre, cargo, padre, orden } }).then(() => { V.jsel = id; log(`añadió a ${nombre}${cargo ? ` (${cargo})` : ''} a la jerarquía${padre ? `, bajo ${ps[padre].nombre}` : ''}`); });
+  },
   bando(fd) {
     const nombre = String(fd.get('nombre') || '').trim(), color = String(fd.get('color') || '#888888'); const bs = bandos();
     let id = slug(nombre); while (bs.some(b => b.id === id)) id += '-2';
@@ -1127,6 +1209,12 @@ const ACTS = {
   verplano() { const m = mapaSel(); if (m && M.info) abrirPlano(m.id, M.info); },
   cerrarplano() { M.plano = null; planoUpdate(); },
   fs() { pantallaCompleta(!M.fs); },
+  jsel(b) { V.jsel = b.dataset.id && b.dataset.id !== V.jsel ? b.dataset.id : null; schedule(); },
+  deljer(b) { if (!guard()) return; const ps = personasJ(), id = b.dataset.id, p = ps[id]; if (!p) return;
+    confirmClick(b, () => { const cambio = { [id]: null }, sube = p.padre && ps[p.padre] ? p.padre : null;
+      // whoever was under this person moves up to this person's boss
+      for (const k of hijosJ(ps, id)) cambio[k] = { padre: sube };
+      guardarJ(cambio).then(() => { V.jsel = null; log(`quitó a ${p.nombre} de la jerarquía`); }).catch(() => {}); }); },
   lado() { M.sinLado = !M.sinLado; schedule(); },
   planozoom(b) { zoomPlano(+b.dataset.z); },
   planoencajar() { if (M.plano) { M.plano.z = null; planoUpdate(); } },
@@ -1636,6 +1724,7 @@ function arrancar() {
   subList('mapas');
   unsubs.push(db.collection('dominio').onSnapshot(snap => { const o = {}; snap.docs.forEach(d => o[d.id] = d.data()); S.dominio = o; schedule(); }, onErr));
   unsubs.push(db.doc('reglas/leyenda').onSnapshot(s => { S.leyenda = s.exists ? s.data() : null; schedule(); }, () => {}));
+  unsubs.push(db.doc('reglas/jerarquia').onSnapshot(s => { S.jerarquia = s.exists ? s.data() : null; schedule(); }, () => {}));
   unsubs.push(db.doc('reglas/jungla').onSnapshot(s => { S.jungla = s.exists ? s.data() : null; schedule(); }, () => {}));
   unsubs.push(db.doc('campana/estado').onSnapshot(s => { const v = s.exists ? s.data().anio : null; S.campana = typeof v === 'number' ? v : null; schedule(); }, () => {}));
   unsubs.push(db.collection('presencia').onSnapshot(snap => { presencia = snap.docs.map(d => ({ id: d.id, ...d.data() })); buildPeers(); }, () => {}));
@@ -1647,7 +1736,7 @@ function parar() {
   unsubs.forEach(u => { try { u(); } catch {} }); unsubs = [];
   for (const k of ['poblacion', 'ganado', 'tierras', 'mina']) S[k] = {};
   for (const k of ['monedas', 'gemas', 'objetos', 'cronica', 'objetivos', 'registro']) S[k] = [];
-  S.ready = {}; S.campana = null; S.jungla = null; S.mapas = []; S.dominio = {}; S.leyenda = null; M.pend = {}; presencia = []; peerList = []; connected = false;
+  S.ready = {}; S.campana = null; S.jungla = null; S.mapas = []; S.dominio = {}; S.leyenda = null; S.jerarquia = null; M.pend = {}; presencia = []; peerList = []; connected = false;
 }
 async function comprobarAcceso() {
   const email = (me.email || '').toLowerCase();
