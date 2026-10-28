@@ -581,7 +581,7 @@ function yearChips(c, label = 'Año') {
   return `<div class="years"><span>${label}</span>` + ys.map(y => `<button class="chip ${esPlan(y) ? 'plan' : ''}" data-act="year" data-c="${c}" data-y="${y}" aria-pressed="${y === cur}" title="${esPlan(y) ? 'Planificado' : y === actual() ? 'Año en curso' : 'Año cerrado'}">${y}</button>`).join('') +
     (ys.some(esPlan) ? '<span class="plan-key">en cursiva: planificado</span>' : '') + '</div>';
 }
-function delBtn(act, id, label = 'Borrar') { return `<button class="x" data-act="${act}" data-id="${esc(id)}" data-needs-write>${label}</button>`; }
+function delBtn(act, id, label = 'Borrar') { return `<button class="x" type="button" data-act="${act}" data-id="${esc(id)}" data-needs-write>${label}</button>`; }
 function vchart(points, unit) {
   if (!points.length) return '<p class="empty">Sin datos todavía.</p>';
   const max = Math.max(...points.map(p => p.v), 1);
