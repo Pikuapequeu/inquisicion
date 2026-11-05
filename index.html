@@ -110,6 +110,7 @@ td.sub { color: var(--muted); font-size: 13px }
 tfoot td { border-top: 1px solid var(--line); font-weight: 700; background: var(--panel-2) }
 .name { font-weight: 500; white-space: nowrap }
 .name small { display: block; font-weight: 400; color: var(--muted); font-size: 12px }
+td.calc small { display: block; font-weight: 400; color: var(--muted); font-size: 12px }
 
 input, select, textarea { font: inherit; color: var(--ink) }
 input.num, input.txt, select.inl { background: transparent; border: 0; border-bottom: 1px dashed var(--line); padding: 3px 2px; border-radius: 0 }
@@ -356,7 +357,7 @@ const MINERALES = [
 ];
 const EFICACIA = { goblins: 0.04, humanos: 0.1, enanos: 0.2 };
 const TABS = [
-  ['resumen','Resumen'],['dominio','Dominio'],['poblacion','Población'],['ganado','Ganado'],['tierras','Tierras'],
+  ['resumen','Resumen'],['dominio','Dominio'],['poblacion','Población'],['ejercito','Ejército'],['ganado','Ganado'],['tierras','Tierras'],
   ['mina','Mina'],['tesoro','Tesoro'],['cronica','Crónica'],['objetivos','Objetivos'],['jerarquia','Jerarquía'],
 ];
 
@@ -420,14 +421,53 @@ const atOrBefore = (c, y) => { const ys = years(c).filter(v => v <= y); return y
 /* ---------- calculations ---------- */
 function calcPob(f) {
   const crec = (f.poblacion || 0) * (f.indCrec || 0);
-  let fin = Math.floor((f.poblacion || 0) + crec + (f.desplazamientos || 0) - (f.bajas || 0));
-  if (f.maximo > 0) fin = Math.min(fin, f.maximo);
-  fin = Math.max(0, fin);
-  return { crec, fin, ejercito: fin * (f.indEjercito || 0), diario: fin * (f.lbDiarias || 0) };
+  const antes = Math.max(0, Math.floor((f.poblacion || 0) + crec + (f.desplazamientos || 0) - (f.bajas || 0) - (f.bajasCiviles || 0)));
+  const fin = f.maximo > 0 ? Math.min(antes, f.maximo) : antes;
+  // whoever doesn't fit in the region leaves with their family
+  return { crec, fin, emigran: antes - fin, diario: fin * (f.lbDiarias || 0) };
 }
+/* Age structure. Everyone in the first census and everyone who moves in counts as the
+   base population (the army index already discounts their elders and children). Each
+   year's births are kept apart as a cohort and only join the adults once they reach
+   the row's military age (16 unless changed). Soldier deaths fall on adults; civilian
+   deaths, families moving out and whoever doesn't fit under the maximum take adults and
+   children alike. */
+const EDAD_MILITAR = 16;
+const edadMil = f => f.edadMilitar > 0 ? f.edadMilitar : EDAD_MILITAR;
+let censoCache = null;
+function censo() {
+  if (censoCache) return censoCache;
+  const out = {}, st = {};
+  const tot = p => p.ad + Object.values(p.co).reduce((s, v) => s + v, 0);
+  const escala = (p, r) => { r = Math.max(0, r); p.ad *= r; for (const n in p.co) p.co[n] *= r; };
+  const quitar = (p, q) => { const t = tot(p); if (t > 0 && q) escala(p, (t - q) / t); };
+  for (const y of years('poblacion')) {
+    const res = out[y] = {};
+    for (const [key, f] of filas(S.poblacion[y])) {
+      const ini = f.poblacion || 0, edad = edadMil(f), c = calcPob(f);
+      const p = st[key] || { ad: ini, co: {} }; st[key] = p;
+      for (const n in p.co) if (y - n >= edad) { p.ad += p.co[n]; delete p.co[n]; }
+      // the year opens with whatever the sheet says, even if someone corrected it by hand
+      const t0 = tot(p); if (t0 > 0) escala(p, ini / t0); else { p.ad = ini; p.co = {}; }
+      p.ad = Math.max(0, p.ad - (f.bajas || 0));
+      quitar(p, f.bajasCiviles || 0);
+      const desp = f.desplazamientos || 0; if (desp >= 0) p.ad += desp; else quitar(p, -desp);
+      if (c.crec >= 0) p.co[y] = (p.co[y] || 0) + c.crec; else quitar(p, -c.crec);
+      const t1 = tot(p); if (t1 > 0) escala(p, c.fin / t1); else { p.ad = c.fin; p.co = {}; }
+      const ninos = Math.round(tot(p) - p.ad), adultos = c.fin - ninos, ind = f.indEjercito || 0;
+      res[key] = { fin: c.fin, adultos, ninos, edad, ejercito: adultos * ind, emigran: c.emigran,
+        cohortes: Object.fromEntries(Object.entries(p.co).filter(([, v]) => v > 0.5)),
+        incorporan: Object.entries(p.co).filter(([n]) => y + 1 - n >= edad).reduce((s, [, v]) => s + v, 0) * ind };
+    }
+  }
+  return censoCache = out;
+}
+const anioDe = d => d && d.anio != null ? d.anio : years('poblacion').find(y => S.poblacion[y] === d);
+const enCenso = (d, key) => (censo()[anioDe(d)] || {})[key] || { adultos: 0, ninos: 0, ejercito: 0, incorporan: 0, cohortes: {} };
 function totPob(d, excluir) {
-  const t = { fin: 0, ejercito: 0, diario: 0, inicio: 0 };
-  for (const [, f] of filas(d)) { if (excluir && excluir.includes(f.region)) continue; const c = calcPob(f); t.fin += c.fin; t.ejercito += c.ejercito; t.diario += c.diario; t.inicio += f.poblacion || 0; }
+  const t = { fin: 0, ejercito: 0, ninos: 0, diario: 0, inicio: 0 };
+  for (const [key, f] of filas(d)) { if (excluir && excluir.includes(f.region)) continue; const c = calcPob(f), e = enCenso(d, key);
+    t.fin += c.fin; t.ejercito += e.ejercito; t.ninos += e.ninos; t.diario += c.diario; t.inicio += f.poblacion || 0; }
   t.anual = t.diario * 365; return t;
 }
 const reglasJungla = () => ({ ...JUNGLA_DEF, ...(S.jungla || {}), casillas: { ...((S.jungla || {}).casillas || {}) } });
@@ -523,6 +563,7 @@ function render() {
     keep = { id: a.id, value: a.value, s: a.selectionStart, e: a.selectionEnd, dirty: a.dataset.dirty === '1' };
   }
   const openDetails = [...document.querySelectorAll('#view details[id]')].filter(d => d.open).map(d => d.id);
+  censoCache = null;
   renderHeader();
   const gate = gateView();
   // the map canvas must survive live updates (someone painting mid-drag), so the Dominio tab
@@ -619,7 +660,7 @@ VIEWS.resumen = () => {
   const tTi = td ? totTierras(td) : { caza: 0, pesca: 0, cultivos: 0, total: 0 }, tGa = gd ? totGanado(gd) : { comida: 0, consumo: 0 };
   const prod = tTi.total + tGa.comida;
   const RJ = reglasJungla(); const tpB = pd ? totPob(pd, RJ.regiones) : null; const jun = pd ? calcJungla(pd) : [];
-  const regiones = {}; if (pd) for (const [, f] of filas(pd)) { const c = calcPob(f); const r = regiones[f.region] = regiones[f.region] || { fin: 0, max: 0, ej: 0 }; r.fin += c.fin; r.max += f.maximo || 0; r.ej += c.ejercito; }
+  const regiones = {}; if (pd) for (const [, f] of filas(pd)) { const c = calcPob(f); const r = regiones[f.region] = regiones[f.region] || { fin: 0, max: 0 }; r.fin += c.fin; r.max += f.maximo || 0; }
   const regRows = Object.entries(regiones).sort((a, b) => b[1].fin - a[1].fin);
   const maxReg = Math.max(1, ...regRows.map(([, r]) => r.max || r.fin));
   const hist = years('poblacion').filter(y => !esPlan(y)).map(y => ({ x: y, v: totPob(S.poblacion[y]).fin, tip: fmt(totPob(S.poblacion[y]).fin, 0) + ' ciudadanos', short: fmt(totPob(S.poblacion[y]).fin, 0) }));
@@ -636,7 +677,7 @@ VIEWS.resumen = () => {
     <div class="head"><div><h2>Estado del dominio · año ${actual()}</h2><p>Lo esencial de la Orden de un vistazo. Todo se recalcula en cuanto alguien cambia un dato en cualquier pestaña. Lo planificado para años futuros no cuenta en estos totales.</p></div></div>
     <div class="stats">
       <div class="stat"><div class="k">Ciudadanos · año ${yp ?? '—'}</div><div class="v">${tp ? fmt(tp.fin, 0) : '—'}</div><div class="s">${tp ? (tp.fin >= tp.inicio ? '+' : '') + fmt(tp.fin - tp.inicio, 0) + ' en el año' : 'Sin censo'}</div></div>
-      <div class="stat"><div class="k">Ejército disponible</div><div class="v">${tp ? fmt(tp.ejercito, 0) : '—'}</div><div class="s">según índice por raza</div></div>
+      <div class="stat"><div class="k">Ejército disponible</div><div class="v">${tp ? fmt(tp.ejercito, 0) : '—'}</div><div class="s">adultos × índice por raza; ${tp ? fmt(tp.ninos, 0) : '—'} niños aún no cuentan</div></div>
       <div class="stat"><div class="k">Tesoro de la Orden</div><div class="v">${fmt(tt.total, 0)} po</div><div class="s">monedas, gemas y objetos con valor</div></div>
       <div class="stat"><div class="k">Mina de Hrakhamar</div><div class="v">${cm ? fmt(cm.valor, 0) + ' po' : 'Sin producir'}</div><div class="s">${cm ? '+' + fmt(cm.prodTot, 0) + ' po este año' : (minaPlan != null ? `empieza en el año ${minaPlan} (planificado)` : '')}</div></div>
       <div class="stat"><div class="k">Objetivos cumplidos</div><div class="v">${ok} / ${S.objetivos.length}</div><div class="progress"><i style="width:${S.objetivos.length ? ok / S.objetivos.length * 100 : 0}%"></i></div></div>
@@ -687,27 +728,27 @@ VIEWS.poblacion = () => {
   if (!d) return emptyView('Población', 'Aún no hay censo. Cuando se carguen los datos del Excel aparecerán aquí.');
   const t = totPob(d);
   const k = (key, f, v, w) => edit ? numIn('pob', key, f, v, w) : fmt(v);
-  const rows = filas(d).map(([key, f]) => { const c = calcPob(f); const full = f.maximo > 0 && c.fin >= f.maximo;
+  const rows = filas(d).map(([key, f]) => { const c = calcPob(f), e = enCenso(d, key); const full = f.maximo > 0 && c.fin >= f.maximo;
     return `<tr><td class="name">${esc(f.region)}<small>${esc(f.raza)} · ${esc(f.subraza)}</small></td>
-      <td class="r">${k(key, 'poblacion', f.poblacion)}</td><td class="r">${k(key, 'bajas', f.bajas)}</td><td class="r">${k(key, 'desplazamientos', f.desplazamientos)}</td>
+      <td class="r">${k(key, 'poblacion', f.poblacion)}</td><td class="r">${k(key, 'bajas', f.bajas)}</td><td class="r">${k(key, 'bajasCiviles', f.bajasCiviles || 0)}</td><td class="r">${k(key, 'desplazamientos', f.desplazamientos)}</td>
       <td class="r">${k(key, 'indCrec', f.indCrec)}</td><td class="r sub">${(c.crec >= 0 ? '+' : '') + fmt(c.crec, 1)}</td>
-      <td class="r">${k(key, 'maximo', f.maximo)}</td><td class="calc">${fmt(c.fin, 0)}${full ? ' <span class="flag">tope</span>' : ''}</td>
-      <td class="r">${k(key, 'indEjercito', f.indEjercito)}</td><td class="calc">${fmt(c.ejercito, 2)}</td>
+      <td class="r">${k(key, 'maximo', f.maximo)}</td><td class="calc">${fmt(c.fin, 0)}${full ? ' <span class="flag">tope</span>' : ''}${c.emigran > 0 ? `<small>${fmt(c.emigran, 0)} emigran</small>` : ''}</td>
+      <td class="r">${k(key, 'indEjercito', f.indEjercito)}</td><td class="calc">${fmt(e.ejercito, 0)}</td>
       <td class="r">${k(key, 'lbDiarias', f.lbDiarias)}</td><td class="calc">${fmt(c.diario, 0)}</td>
       <td>${edit ? delBtn('delrow', 'poblacion|' + key, 'Quitar') : ''}</td></tr>`; }).join('');
   return `<div class="sheet">
-    <div class="head"><div><h2>Población y ejército</h2><p>Ciudadanos al cierre = población inicial + crecimiento + desplazamientos − bajas, redondeado hacia abajo y limitado al máximo de la región.</p></div>${yearChips('poblacion')}</div>
+    <div class="head"><div><h2>Población y ejército</h2><p>Ciudadanos al cierre = población inicial + crecimiento + desplazamientos − bajas de soldados − bajas civiles, redondeado hacia abajo. Quien no cabe en el máximo de la región emigra con su familia. El ejército solo cuenta a los adultos (detalle en la pestaña Ejército).</p></div>${yearChips('poblacion')}</div>
     ${yearBanner('poblacion')}
     <div class="stats">
       <div class="stat"><div class="k">Ciudadanos al cierre</div><div class="v">${fmt(t.fin, 0)}</div><div class="s">empezó el año con ${fmt(t.inicio, 0)}</div></div>
-      <div class="stat"><div class="k">Ejército</div><div class="v">${fmt(t.ejercito, 0)}</div></div>
+      <div class="stat"><div class="k">Ejército</div><div class="v">${fmt(t.ejercito, 0)}</div><div class="s">${fmt(t.ninos, 0)} niños aún no cuentan</div></div>
       <div class="stat"><div class="k">Consumo diario</div><div class="v">${fmt(t.diario, 0)} lb</div></div>
       <div class="stat"><div class="k">Consumo anual</div><div class="v">${big(t.anual)} lb</div></div>
     </div>
     <div class="tbl"><table>
-      <thead><tr><th>Región · pueblo</th><th class="r">Población inicial</th><th class="r">Bajas</th><th class="r">Desplaz.</th><th class="r">Índice crec.</th><th class="r">Crec.</th><th class="r">Máximo</th><th class="r">Ciudadanos</th><th class="r">Índice ejército</th><th class="r">Ejército</th><th class="r">lb/día pers.</th><th class="r">lb/día</th><th></th></tr></thead>
+      <thead><tr><th>Región · pueblo</th><th class="r">Población inicial</th><th class="r" title="Mueren adultos: soldados en combate">Bajas soldados</th><th class="r" title="Mueren adultos y niños por igual: asaltos, plagas…">Bajas civiles</th><th class="r">Desplaz.</th><th class="r">Índice crec.</th><th class="r">Crec.</th><th class="r">Máximo</th><th class="r">Ciudadanos</th><th class="r">Índice ejército</th><th class="r">Ejército</th><th class="r">lb/día pers.</th><th class="r">lb/día</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
-      <tfoot><tr><td>Total</td><td class="r">${fmt(t.inicio, 0)}</td><td colspan="5"></td><td class="r">${fmt(t.fin, 0)}</td><td></td><td class="r">${fmt(t.ejercito, 2)}</td><td></td><td class="r">${fmt(t.diario, 0)}</td><td></td></tr></tfoot>
+      <tfoot><tr><td>Total</td><td class="r">${fmt(t.inicio, 0)}</td><td colspan="6"></td><td class="r">${fmt(t.fin, 0)}</td><td></td><td class="r">${fmt(t.ejercito, 0)}</td><td></td><td class="r">${fmt(t.diario, 0)}</td><td></td></tr></tfoot>
     </table></div>
     ${edit ? `<details class="adder" id="add-pob"><summary>Añadir un pueblo o región</summary>
       <form class="add" data-form="pob">
@@ -716,6 +757,61 @@ VIEWS.poblacion = () => {
         <label>Máximo<input name="maximo" type="number" step="any" value="0"></label><label>Índice crec.<input name="indCrec" type="number" step="any" value="0.125"></label>
         <label>Índice ejército<input name="indEjercito" type="number" step="any" value="0.75"></label><label>lb/día<input name="lbDiarias" type="number" step="any" value="3"></label>
         <button class="btn" type="submit">Añadir</button></form></details>` : ''}
+  </div>`;
+};
+
+VIEWS.ejercito = () => {
+  const y = selYear('poblacion'); const d = S.poblacion[y]; const edit = y === actual();
+  if (!d) return emptyView('Ejército', 'Aún no hay censo. El ejército se calcula a partir de la población.');
+  const C = censo()[y] || {};
+  const k = (key, f, v) => edit ? numIn('pob', key, f, v) : fmt(v);
+  const T = { fin: 0, adultos: 0, ninos: 0, ejercito: 0, incorporan: 0 };
+  const llegan = {};   // year a cohort comes of age → { jovenes, soldados, pueblos }
+  const rows = filas(d).map(([key, f]) => {
+    const c = C[key]; if (!c) return '';
+    for (const k2 in T) T[k2] += c[k2];
+    for (const [n, v] of Object.entries(c.cohortes)) {
+      const a = +n + c.edad, g = llegan[a] = llegan[a] || { jovenes: 0, soldados: 0, pueblos: new Set() };
+      g.jovenes += v; g.soldados += v * (f.indEjercito || 0); if (f.indEjercito > 0) g.pueblos.add(f.region);
+    }
+    return `<tr><td class="name">${esc(f.region)}<small>${esc(f.raza)} · ${esc(f.subraza)}</small></td>
+      <td class="r">${fmt(c.fin, 0)}</td><td class="r">${fmt(c.adultos, 0)}</td><td class="r sub">${fmt(c.ninos, 0)}</td>
+      <td class="r">${k(key, 'edadMilitar', c.edad)}</td><td class="r">${k(key, 'indEjercito', f.indEjercito)}</td>
+      <td class="calc">${fmt(c.ejercito, 0)}</td>
+      <td class="r">${c.incorporan >= 0.5 ? '+' + fmt(c.incorporan, 0) : '—'}</td></tr>`;
+  }).join('');
+  let acum = T.ejercito;
+  const futuras = Object.entries(llegan).map(([a, g]) => [+a, g]).filter(([, g]) => g.jovenes >= 0.5).sort((a, b) => a[0] - b[0]);
+  const primera = futuras.find(([, g]) => g.soldados >= 0.5);
+  const hist = years('poblacion').map(yy => { const t = totPob(S.poblacion[yy]);
+    return { x: yy, v: t.ejercito, plan: esPlan(yy), tip: `${fmt(t.ejercito, 0)} soldados · ${fmt(t.ninos, 0)} niños`, short: fmt(t.ejercito, 0) }; });
+  return `<div class="sheet">
+    <div class="head"><div><h2>Ejército</h2><p>Solo cuentan los adultos: la población del primer censo y quienes llegan desplazados, más los nacidos en la campaña cuando cumplen la edad mínima de su raza. Ejército = adultos × índice de ejército.</p></div>${yearChips('poblacion')}</div>
+    ${yearBanner('poblacion')}
+    <div class="stats">
+      <div class="stat"><div class="k">Ejército disponible · año ${y}</div><div class="v">${fmt(T.ejercito, 0)}</div><div class="s">de ${fmt(T.adultos, 0)} adultos</div></div>
+      <div class="stat"><div class="k">Niños</div><div class="v">${fmt(T.ninos, 0)}</div><div class="s">nacidos en la campaña, aún sin edad</div></div>
+      <div class="stat"><div class="k">Se incorporan el año ${y + 1}</div><div class="v">${T.incorporan >= 0.5 ? '+' + fmt(T.incorporan, 0) : '0'}</div><div class="s">jóvenes que cumplen la edad</div></div>
+      <div class="stat"><div class="k">Primera generación</div><div class="v">${primera ? 'Año ' + primera[0] : '—'}</div><div class="s">${primera ? '+' + fmt(primera[1].soldados, 0) + ' soldados ese año' : 'sin niños por ahora'}</div></div>
+    </div>
+    <div class="tbl"><table>
+      <thead><tr><th>Región · pueblo</th><th class="r">Ciudadanos</th><th class="r">Adultos</th><th class="r">Niños</th><th class="r" title="Edad a la que un nacido en la campaña puede entrar en el ejército">Edad mínima</th><th class="r">Índice ejército</th><th class="r">Ejército</th><th class="r">Se incorporan el año ${y + 1}</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><td>Total</td><td class="r">${fmt(T.fin, 0)}</td><td class="r">${fmt(T.adultos, 0)}</td><td class="r">${fmt(T.ninos, 0)}</td><td colspan="2"></td><td class="r">${fmt(T.ejercito, 0)}</td><td class="r">${T.incorporan >= 0.5 ? '+' + fmt(T.incorporan, 0) : '—'}</td></tr></tfoot>
+    </table></div>
+    <div class="cols">
+      <section class="panel"><h3>Próximas incorporaciones</h3>
+        ${futuras.length ? `<div class="tbl" style="border:0"><table>
+          <thead><tr><th>Año</th><th class="r">Cumplen la edad</th><th class="r">Nuevos soldados</th><th class="r">Ejército entonces</th></tr></thead>
+          <tbody>${futuras.map(([a, g]) => { acum += g.soldados; return `<tr><td class="name">Año ${a}<small>${esc([...g.pueblos].join(', ') || 'no combaten')}</small></td>
+            <td class="r">${fmt(g.jovenes, 0)}</td><td class="r">+${fmt(g.soldados, 0)}</td><td class="calc">${fmt(acum, 0)}</td></tr>`; }).join('')}</tbody>
+        </table></div>
+        <p class="ui muted" style="font-size:13px;margin:8px 0 0">Cuenta solo a los niños que ya han nacido al cierre del año ${y}. No tiene en cuenta bajas ni nacimientos futuros.</p>` : '<p class="empty">No hay niños esperando a cumplir la edad.</p>'}
+      </section>
+      <section class="panel"><h3>Ejército al cierre de cada año</h3>${vchart(hist, 'soldados')}
+        <p class="ui muted" style="font-size:13px;margin:12px 0 0"><b>Bajas soldados</b> (pestaña Población) solo quitan adultos. <b>Bajas civiles</b>, las familias que se marchan y quienes emigran por no caber en el máximo de la región quitan adultos y niños por igual.</p>
+      </section>
+    </div>
   </div>`;
 };
 
@@ -1017,7 +1113,7 @@ VIEWS.jerarquia = () => {
 function emptyView(t, msg) { return `<div class="sheet"><div class="head"><h2>${t}</h2></div><p class="empty">${msg}</p></div>`; }
 
 /* ---------- bindings (inline edits) ---------- */
-const LABEL = { poblacion: 'población', bajas: 'bajas', desplazamientos: 'desplazamientos', indCrec: 'índice de crecimiento', maximo: 'máximo', lbDiarias: 'lb/día', indEjercito: 'índice de ejército',
+const LABEL = { poblacion: 'población', bajas: 'bajas de soldados', bajasCiviles: 'bajas civiles', edadMilitar: 'edad mínima para el ejército',desplazamientos: 'desplazamientos', indCrec: 'índice de crecimiento', maximo: 'máximo', lbDiarias: 'lb/día', indEjercito: 'índice de ejército',
   anadidas: 'añadidas', sacrificadas: 'sacrificadas', animales: 'animales', consumoPorAnimal: 'forraje por animal', carne: 'carne', leche: 'leche', huevos: 'huevos', lana: 'lana',
   caza: 'millas de caza', pesca: 'millas de pesca', trigo: 'millas de trigo', legumbres: 'millas de legumbres', frutales: 'millas de frutales', uva: 'millas de vid',
   trigoTierra: 'tierra del trigo', legumbresTierra: 'tierra de las legumbres', frutalesTierra: 'tierra de los frutales', uvaTierra: 'tierra de la vid' };
@@ -1086,7 +1182,7 @@ document.addEventListener('keydown', e => { if (e.key !== 'Escape') return; if (
 const maxOrden = list => list.reduce((m, x) => Math.max(m, x.orden || 0), 0) + 1;
 const FORMS = {
   pob(fd) { return addRow('poblacion', slug(fd.get('region') + ' ' + (fd.get('subraza') || fd.get('raza'))), {
-    raza: fd.get('raza'), subraza: fd.get('subraza') || '', region: fd.get('region'), poblacion: num(fd.get('poblacion')) || 0, bajas: 0, desplazamientos: 0,
+    raza: fd.get('raza'), subraza: fd.get('subraza') || '', region: fd.get('region'), poblacion: num(fd.get('poblacion')) || 0, bajas: 0, bajasCiviles: 0, desplazamientos: 0,
     indCrec: num(fd.get('indCrec')) || 0, maximo: num(fd.get('maximo')) || 0, lbDiarias: num(fd.get('lbDiarias')) || 0, indEjercito: num(fd.get('indEjercito')) || 0 }, r => `${r.region} · ${r.subraza || r.raza}`); },
   gan(fd) { return addRow('ganado', slug(fd.get('especie') + ' ' + fd.get('region')), {
     especie: fd.get('especie'), region: fd.get('region'), alimento: fd.get('alimento') || '', poblacion: 0, anadidas: num(fd.get('animales')) || 0, sacrificadas: 0, indCrec: 0,
@@ -1272,7 +1368,7 @@ function siguiente(c, d, ny) {
   }
   const f = {};
   for (const [k, r] of filas(d)) {
-    if (c === 'poblacion') f[k] = { ...r, poblacion: calcPob(r).fin, bajas: 0, desplazamientos: 0 };
+    if (c === 'poblacion') f[k] = { ...r, poblacion: calcPob(r).fin, bajas: 0, bajasCiviles: 0, desplazamientos: 0 };
     else if (c === 'ganado') f[k] = { ...r, poblacion: r.animales || 0, anadidas: 0, sacrificadas: 0 };
     else f[k] = { ...r };
   }
