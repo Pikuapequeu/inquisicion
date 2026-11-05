@@ -436,6 +436,18 @@ const MUERTE_RAZA = { Humano: 82, Goblin: 60, Enano: 350, Elfo: 750 };
 const edadMil = f => f.edadMilitar > 0 ? f.edadMilitar : EDAD_MILITAR;
 const edadHij = f => f.edadHijos > 0 ? f.edadHijos : EDAD_HIJOS;
 const edadMue = f => f.edadMuerte > 0 ? f.edadMuerte : (MUERTE_RAZA[f.raza] || EDAD_MUERTE);
+// Ages of the people already living there (or arriving) when nobody knows them. Barovia was a
+// hard, miserable land: the oldest humans were 60 and they were 3 % of the people; the rest are
+// spread evenly from 0 to 59. Other peoples: ages spread evenly from 0 to their death age.
+const EDADES_LLEGADA = { Humano: { max: 60, mayores: 0.03 } };
+// Share of an arrival group (still alive) that dies of old age t years after it arrived.
+function riesgoVejez(f, L, t) {
+  const D = EDADES_LLEGADA[f.raza] || { max: L - 1, mayores: 1 / L };
+  const a = L - t;                       // age on arrival of those who reach L this year
+  if (a < 0) return 1; if (a > D.max) return 0;
+  const resto = (1 - D.mayores) / D.max, vivos = a === D.max ? 1 : (a + 1) * resto;
+  return vivos > 0 ? (a === D.max ? D.mayores : resto) / vivos : 1;
+}
 let censoCache = null;
 function censo() {
   if (censoCache) return censoCache;
@@ -462,7 +474,7 @@ function censo() {
       const crec = mayores(p, y, eH) * (f.indCrec || 0);
       // old age: one more slice of each arrival group, and any child cohort that reaches L
       let muertes = 0;
-      for (const e in p.base) { const t = y - e; if (t < 1) continue; const m = p.base[e] * (t >= L ? 1 : 1 / (L - t + 1)); p.base[e] -= m; muertes += m; }
+      for (const e in p.base) { const t = y - e; if (t < 1) continue; const m = p.base[e] * riesgoVejez(f, L, t); p.base[e] -= m; muertes += m; }
       for (const n in p.co) if (y - n >= L) { muertes += p.co[n]; p.co[n] = 0; }
       const bajas = f.bajas || 0, bajasCiv = f.bajasCiviles || 0, desp = f.desplazamientos || 0;
       const sold = mayores(p, y, eM); escala(p, sold > 0 ? (sold - bajas) / sold : 0, y, eM);
@@ -864,8 +876,8 @@ VIEWS.mortandad = () => {
         <p class="ui muted" style="font-size:13px;margin:8px 0 0">Desde el año 1 hasta el ${y} han muerto ${fmt(acum, 0)} personas.</p>
       </section>
       <section class="panel"><h3>Cómo se calcula</h3>
-        <p class="ui" style="margin:0 0 8px">No conocemos la edad de quienes ya vivían en el año 0 ni de los desplazados que llegan, así que se supone que hay gente de todas las edades por igual, de 0 años a la edad de muerte natural.</p>
-        <p class="ui" style="margin:0 0 8px">Cada año envejecen todos un año y muere la franja que llega a esa edad: en un grupo humano de 820 personas, unas 10 al año (en Krezk, 1 de cada 100). Un grupo que acaba de llegar no pierde a nadie su primer año.</p>
+        <p class="ui" style="margin:0 0 8px">Barovia era una tierra dura y miserable: en el año 0 los más viejos tenían 60 años y eran el 3 % de la población; el resto tenía de 0 a 59 años, repartidos por igual. Lo mismo se supone de los humanos desplazados que llegan, contando desde el año en que llegan.</p>
+        <p class="ui" style="margin:0 0 8px">Por eso nadie muere de viejo hasta que los de 60 cumplen 82: el año 22 (en Krezk, por su fuente, el año 40). Ese año muere de golpe ese 3 %, y después, cada año, la franja que llega a la edad. Goblins, enanos y elfos tienen edades repartidas por igual hasta su edad de muerte.</p>
         <p class="ui muted" style="margin:0">Los nacidos en la campaña tienen su edad exacta y no morirán de viejos hasta dentro de muchos años. La edad de muerte natural se cambia por pueblo en esta tabla, en el año en curso.</p>
       </section>
     </div>
