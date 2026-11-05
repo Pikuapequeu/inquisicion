@@ -419,14 +419,15 @@ const filas = d => Object.entries(d?.filas || {}).filter(([, f]) => f).sort((a, 
 const atOrBefore = (c, y) => { const ys = years(c).filter(v => v <= y); return ys.length ? S[c][ys[ys.length - 1]] : null; };
 
 /* ---------- calculations ---------- */
-/* Population, year by year, kept by age. Everyone in the first census and everyone who moves
-   in counts as the base population (the army and growth indices already discount their
-   elders and children); each group is kept by the year it arrived and is assumed to have
-   ages spread evenly from 0 to the natural death age, so every year the oldest slice dies
-   (1/82 of the group at first for humans). Each year's births are kept apart by year of
-   birth: they join the army at the row's military age (16), start having children at the
-   row's family age (18) and die at the natural death age. Nobody dies of illness: the
-   Inquisition's clerics heal them.
+/* Population, year by year, following every age. Everyone in the first census and everyone
+   who moves in counts as the base population (the army and growth indices already discount
+   their elders and children); their exact ages are unknown, so on arrival they get the ages
+   of EDADES_LLEGADA. Children born during the campaign are kept apart by age: they join the
+   army at the row's military age (16), start having children at the row's family age (18).
+   Every year everybody grows one year older and whoever reaches the natural death age of the
+   town they live in dies (Krezk's fountain only works while they keep drinking from it:
+   someone who leaves Krezk older than 82 dies on arriving in Barovia). Nobody dies of
+   illness: the Inquisition's clerics heal them.
    Growth = adults of family age × growth index. Soldier deaths fall on adults of military
    age; civilian deaths, families moving out and whoever doesn't fit under the maximum take
    every age alike. Whoever doesn't fit goes, as whole families, to the row named in
@@ -443,25 +444,26 @@ const edadMue = f => f.edadMuerte > 0 ? f.edadMuerte : (MUERTE_RAZA[f.raza] || E
 // hard, miserable land: the oldest humans were 60 and they were 3 % of the people; the rest are
 // spread evenly from 0 to 59. Other peoples: ages spread evenly from 0 to their death age.
 const EDADES_LLEGADA = { Humano: { max: 60, mayores: 0.03 } };
-// Share of an arrival group (still alive) that dies of old age t years after it arrived.
-function riesgoVejez(f, L, t) {
-  const D = EDADES_LLEGADA[f.raza] || { max: L - 1, mayores: 1 / L };
-  const a = L - t;                       // age on arrival of those who reach L this year
-  if (a < 0) return 1; if (a > D.max) return 0;
-  const resto = (1 - D.mayores) / D.max, vivos = a === D.max ? 1 : (a + 1) * resto;
-  return vivos > 0 ? (a === D.max ? D.mayores : resto) / vivos : 1;
+function reparto(f, n, N) {
+  const a = new Float64Array(N), D = EDADES_LLEGADA[f.raza];
+  if (D) { a[D.max] = D.mayores * n; for (let i = 0; i < D.max; i++) a[i] = (1 - D.mayores) * n / D.max; }
+  else { const L = Math.min(edadMue(f), N); for (let i = 0; i < L; i++) a[i] = n / L; }
+  return a;
 }
 let censoCache = null;
 function censo() {
   if (censoCache) return censoCache;
-  const out = {}, st = {};
-  const suma = o => Object.values(o).reduce((s, v) => s + v, 0);
-  const tot = p => suma(p.base) + suma(p.co);
-  const mayores = (p, y, e) => suma(p.base) + Object.entries(p.co).reduce((s, [n, v]) => s + (y - n >= e ? v : 0), 0);
-  const escala = (p, r, y, e) => { r = Math.max(0, r); for (const n in p.base) p.base[n] *= r; for (const n in p.co) if (e == null || y - n >= e) p.co[n] *= r; };
+  const ys = years('poblacion');
+  let N = 101; for (const y of ys) for (const [, f] of filas(S.poblacion[y])) N = Math.max(N, edadMue(f) + 1, (EDADES_LLEGADA[f.raza]?.max || 0) + 1);
+  const sum = (a, desde = 0) => { let s = 0; for (let i = desde; i < a.length; i++) s += a[i]; return s; };
+  const mul = (a, r, desde = 0) => { r = Math.max(0, r); for (let i = desde; i < a.length; i++) a[i] *= r; };
+  const tot = p => sum(p.base) + sum(p.nac);
+  const mayores = (p, e) => sum(p.base) + sum(p.nac, e);
+  const escala = (p, r) => { mul(p.base, r); mul(p.nac, r); };
   const quitar = (p, q) => { const t = tot(p); if (t > 0 && q) escala(p, (t - q) / t); };
-  const sumar = (o, n, v) => { o[n] = (o[n] || 0) + v; };
-  for (const y of years('poblacion')) {
+  const vejez = (p, L) => { const m = sum(p.base, L) + sum(p.nac, L); p.base.fill(0, L); p.nac.fill(0, L); return m; };
+  const out = {}, st = {};
+  for (const y of ys) {
     const res = out[y] = {}, fs = filas(S.poblacion[y]), aqui = new Set(fs.map(([k]) => k)), llegan = {};
     // whoever sends people elsewhere is worked out before whoever receives them
     const orden = [], hecho = new Set();
@@ -471,36 +473,42 @@ function censo() {
     }
     for (const [key, f] of orden) {
       const ini = f.poblacion || 0, eM = edadMil(f), eH = edadHij(f), L = edadMue(f);
-      const p = st[key] || { base: { [y]: ini }, co: {} }; st[key] = p;
-      // the year opens with whatever the sheet says, even if someone corrected it by hand
-      const t0 = tot(p); if (t0 > 0) escala(p, ini / t0); else { p.base = { [y]: ini }; p.co = {}; }
-      const crec = mayores(p, y, eH) * (f.indCrec || 0);
-      // old age: one more slice of each arrival group, and any child cohort that reaches L
-      let muertes = 0;
-      for (const e in p.base) { const t = y - e; if (t < 1) continue; const m = p.base[e] * riesgoVejez(f, L, t); p.base[e] -= m; muertes += m; }
-      for (const n in p.co) if (y - n >= L) { muertes += p.co[n]; p.co[n] = 0; }
+      let p = st[key];
+      if (!p) p = st[key] = { y, base: reparto(f, ini, N), nac: new Float64Array(N) };
+      else {                                   // everybody is older by the years gone by
+        const d = y - p.y; p.y = y;
+        if (d > 0) for (const a of [p.base, p.nac]) { a.copyWithin(d, 0, N - d); a.fill(0, 0, Math.min(d, N)); }
+        // the year opens with whatever the sheet says, even if someone corrected it by hand
+        const t0 = tot(p); if (t0 > 0) escala(p, ini / t0); else { p.base = reparto(f, ini, N); p.nac = new Float64Array(N); }
+      }
+      const crec = mayores(p, eH) * (f.indCrec || 0);
+      let muertes = vejez(p, L);
       const bajas = f.bajas || 0, bajasCiv = f.bajasCiviles || 0, desp = f.desplazamientos || 0;
-      const sold = mayores(p, y, eM); escala(p, sold > 0 ? (sold - bajas) / sold : 0, y, eM);
+      const sold = mayores(p, eM); if (sold > 0) { const r = (sold - bajas) / sold; mul(p.base, r); mul(p.nac, r, eM); }
       quitar(p, bajasCiv);
-      if (desp >= 0) sumar(p.base, y, desp); else quitar(p, -desp);
+      if (desp >= 0) { const g = reparto(f, desp, N); for (let i = 0; i < N; i++) p.base[i] += g[i]; } else quitar(p, -desp);
       const g = llegan[key]; let recibe = 0;
-      if (g) { recibe = g.n; for (const n in g.base) sumar(p.base, n, g.base[n]); for (const n in g.co) sumar(p.co, n, g.co[n]); }
-      if (crec >= 0) sumar(p.co, y, crec); else quitar(p, -crec);
-      const antes = Math.max(0, Math.floor(ini + crec + desp + recibe - bajas - bajasCiv - muertes));
+      if (g) {   // families arriving from elsewhere; those already past this town's death age die
+        recibe = g.n; for (let i = 0; i < N; i++) { p.base[i] += g.base[i]; p.nac[i] += g.nac[i]; }
+        muertes += vejez(p, L);
+      }
+      if (crec >= 0) p.nac[0] += crec; else quitar(p, -crec);
+      const antes = Math.max(0, Math.floor(ini + crec + desp + recibe - bajas - bajasCiv - muertes + 1e-9));
       const fin = f.maximo > 0 ? Math.min(antes, f.maximo) : antes, emigran = antes - fin;
       const t1 = tot(p);
       if (emigran > 0 && t1 > 0 && f.emigranA && f.emigranA !== key && aqui.has(f.emigranA)) {
-        const q = emigran / t1, d = llegan[f.emigranA] = llegan[f.emigranA] || { n: 0, base: {}, co: {} };
-        d.n += emigran; for (const n in p.base) sumar(d.base, n, p.base[n] * q); for (const n in p.co) sumar(d.co, n, p.co[n] * q);
+        const q = emigran / t1, d = llegan[f.emigranA] = llegan[f.emigranA] || { n: 0, base: new Float64Array(N), nac: new Float64Array(N) };
+        d.n += emigran; for (let i = 0; i < N; i++) { d.base[i] += p.base[i] * q; d.nac[i] += p.nac[i] * q; }
       }
-      if (t1 > 0) escala(p, fin / t1); else { p.base = { [y]: fin }; p.co = {}; }
-      const ninos = Math.round(tot(p) - mayores(p, y, eM)), adultos = fin - ninos, ind = f.indEjercito || 0;
-      const menores = Math.min(fin, Math.round(tot(p) - mayores(p, y, EDAD_COMIDA)));
+      if (t1 > 0) escala(p, fin / t1); else { p.base = reparto(f, fin, N); p.nac = new Float64Array(N); }
+      const total = tot(p), ninos = Math.round(total - mayores(p, eM)), adultos = fin - ninos, ind = f.indEjercito || 0;
+      const menores = Math.min(fin, Math.round(total - mayores(p, EDAD_COMIDA)));
+      const porEdad = {}, cohortes = {};
+      for (let a = 0; a < N; a++) if (p.nac[a] > 0) { porEdad[a] = p.nac[a]; if (a < eM && p.nac[a] > 0.5) cohortes[y - a] = p.nac[a]; }
       res[key] = { ini, crec, muertes, recibe, emigran, emigranA: aqui.has(f.emigranA) ? f.emigranA : null, fin, adultos, ninos,
-        edad: eM, edadHijos: eH, edadMuerte: L, ejercito: adultos * ind, menores, diario: (fin - menores) * (f.lbDiarias || 0) + menores * lbNin(f),
-        cohortes: Object.fromEntries(Object.entries(p.co).filter(([n, v]) => y - n < eM && v > 0.5)),
-        porEdad: Object.fromEntries(Object.entries(p.co).map(([n, v]) => [y - n, v])),
-        incorporan: Object.entries(p.co).filter(([n]) => y - n < eM && y + 1 - n >= eM).reduce((s, [, v]) => s + v, 0) * ind };
+        edad: eM, edadHijos: eH, edadMuerte: L, ejercito: adultos * ind,
+        menores, diario: (fin - menores) * (f.lbDiarias || 0) + menores * lbNin(f),
+        cohortes, porEdad, incorporan: (eM >= 1 ? p.nac[eM - 1] : 0) * ind };
     }
   }
   return censoCache = out;
@@ -882,6 +890,7 @@ VIEWS.mortandad = () => {
       <section class="panel"><h3>Cómo se calcula</h3>
         <p class="ui" style="margin:0 0 8px">Barovia era una tierra dura y miserable: en el año 0 los más viejos tenían 60 años y eran el 3 % de la población; el resto tenía de 0 a 59 años, repartidos por igual. Lo mismo se supone de los humanos desplazados que llegan, contando desde el año en que llegan.</p>
         <p class="ui" style="margin:0 0 8px">Por eso nadie muere de viejo hasta que los de 60 cumplen 82: el año 22 (en Krezk, por su fuente, el año 40). Ese año muere de golpe ese 3 %, y después, cada año, la franja que llega a la edad. Goblins, enanos y elfos tienen edades repartidas por igual hasta su edad de muerte.</p>
+        <p class="ui" style="margin:0 0 8px">La fuente de Krezk solo alarga la vida mientras se bebe de ella: quien se va de Krezk pasa a morir a la edad del pueblo al que llega, y si ya la ha pasado, muere al llegar. Quien se muda a Krezk, en cambio, vive hasta los 100.</p>
         <p class="ui muted" style="margin:0">Los nacidos en la campaña tienen su edad exacta y no morirán de viejos hasta dentro de muchos años. La edad de muerte natural se cambia por pueblo en esta tabla, en el año en curso.</p>
       </section>
     </div>
