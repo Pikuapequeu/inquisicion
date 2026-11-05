@@ -419,55 +419,70 @@ const filas = d => Object.entries(d?.filas || {}).filter(([, f]) => f).sort((a, 
 const atOrBefore = (c, y) => { const ys = years(c).filter(v => v <= y); return ys.length ? S[c][ys[ys.length - 1]] : null; };
 
 /* ---------- calculations ---------- */
-function calcPob(f) {
-  const crec = (f.poblacion || 0) * (f.indCrec || 0);
-  const antes = Math.max(0, Math.floor((f.poblacion || 0) + crec + (f.desplazamientos || 0) - (f.bajas || 0) - (f.bajasCiviles || 0)));
-  const fin = f.maximo > 0 ? Math.min(antes, f.maximo) : antes;
-  // whoever doesn't fit in the region leaves with their family
-  return { crec, fin, emigran: antes - fin, diario: fin * (f.lbDiarias || 0) };
-}
-/* Age structure. Everyone in the first census and everyone who moves in counts as the
-   base population (the army index already discounts their elders and children). Each
-   year's births are kept apart as a cohort and only join the adults once they reach
-   the row's military age (16 unless changed). Soldier deaths fall on adults; civilian
-   deaths, families moving out and whoever doesn't fit under the maximum take adults and
-   children alike. */
-const EDAD_MILITAR = 16;
+/* Population, year by year, kept by age. Everyone in the first census and everyone who moves
+   in counts as the base population (the army and growth indices already discount their
+   elders and children). Each year's births are kept apart by year of birth: they join the
+   army at the row's military age (16) and start having children at the row's family age (18).
+   Growth = adults of family age × growth index. Soldier deaths fall on adults of military
+   age; civilian deaths, families moving out and whoever doesn't fit under the maximum take
+   adults and children alike. Whoever doesn't fit goes, as whole families, to the row named in
+   emigranA (Krezk → Barovia) if it exists that year; otherwise they leave the domain. */
+const EDAD_MILITAR = 16, EDAD_HIJOS = 18;
 const edadMil = f => f.edadMilitar > 0 ? f.edadMilitar : EDAD_MILITAR;
+const edadHij = f => f.edadHijos > 0 ? f.edadHijos : EDAD_HIJOS;
 let censoCache = null;
 function censo() {
   if (censoCache) return censoCache;
   const out = {}, st = {};
   const tot = p => p.ad + Object.values(p.co).reduce((s, v) => s + v, 0);
-  const escala = (p, r) => { r = Math.max(0, r); p.ad *= r; for (const n in p.co) p.co[n] *= r; };
+  const mayores = (p, y, e) => p.ad + Object.entries(p.co).reduce((s, [n, v]) => s + (y - n >= e ? v : 0), 0);
+  const escala = (p, r, y, e) => { r = Math.max(0, r); p.ad *= r; for (const n in p.co) if (e == null || y - n >= e) p.co[n] *= r; };
   const quitar = (p, q) => { const t = tot(p); if (t > 0 && q) escala(p, (t - q) / t); };
   for (const y of years('poblacion')) {
-    const res = out[y] = {};
-    for (const [key, f] of filas(S.poblacion[y])) {
-      const ini = f.poblacion || 0, edad = edadMil(f), c = calcPob(f);
+    const res = out[y] = {}, fs = filas(S.poblacion[y]), aqui = new Set(fs.map(([k]) => k)), llegan = {};
+    // whoever sends people elsewhere is worked out before whoever receives them
+    const orden = [], hecho = new Set();
+    while (orden.length < fs.length) {
+      const sig = fs.find(([k]) => !hecho.has(k) && !fs.some(([k2, f2]) => !hecho.has(k2) && k2 !== k && f2.emigranA === k)) || fs.find(([k]) => !hecho.has(k));
+      orden.push(sig); hecho.add(sig[0]);
+    }
+    for (const [key, f] of orden) {
+      const ini = f.poblacion || 0, eM = edadMil(f), eH = edadHij(f);
       const p = st[key] || { ad: ini, co: {} }; st[key] = p;
-      for (const n in p.co) if (y - n >= edad) { p.ad += p.co[n]; delete p.co[n]; }
       // the year opens with whatever the sheet says, even if someone corrected it by hand
       const t0 = tot(p); if (t0 > 0) escala(p, ini / t0); else { p.ad = ini; p.co = {}; }
-      p.ad = Math.max(0, p.ad - (f.bajas || 0));
-      quitar(p, f.bajasCiviles || 0);
-      const desp = f.desplazamientos || 0; if (desp >= 0) p.ad += desp; else quitar(p, -desp);
-      if (c.crec >= 0) p.co[y] = (p.co[y] || 0) + c.crec; else quitar(p, -c.crec);
-      const t1 = tot(p); if (t1 > 0) escala(p, c.fin / t1); else { p.ad = c.fin; p.co = {}; }
-      const ninos = Math.round(tot(p) - p.ad), adultos = c.fin - ninos, ind = f.indEjercito || 0;
-      res[key] = { fin: c.fin, adultos, ninos, edad, ejercito: adultos * ind, emigran: c.emigran,
-        cohortes: Object.fromEntries(Object.entries(p.co).filter(([, v]) => v > 0.5)),
-        incorporan: Object.entries(p.co).filter(([n]) => y + 1 - n >= edad).reduce((s, [, v]) => s + v, 0) * ind };
+      const crec = mayores(p, y, eH) * (f.indCrec || 0);
+      const bajas = f.bajas || 0, bajasCiv = f.bajasCiviles || 0, desp = f.desplazamientos || 0;
+      const sold = mayores(p, y, eM); escala(p, sold > 0 ? (sold - bajas) / sold : 0, y, eM);
+      quitar(p, bajasCiv);
+      if (desp >= 0) p.ad += desp; else quitar(p, -desp);
+      const g = llegan[key]; let recibe = 0;
+      if (g) { recibe = g.n; p.ad += g.ad; for (const n in g.co) p.co[n] = (p.co[n] || 0) + g.co[n]; }
+      if (crec >= 0) p.co[y] = (p.co[y] || 0) + crec; else quitar(p, -crec);
+      const antes = Math.max(0, Math.floor(ini + crec + desp + recibe - bajas - bajasCiv));
+      const fin = f.maximo > 0 ? Math.min(antes, f.maximo) : antes, emigran = antes - fin;
+      const t1 = tot(p);
+      if (emigran > 0 && t1 > 0 && f.emigranA && f.emigranA !== key && aqui.has(f.emigranA)) {
+        const q = emigran / t1, d = llegan[f.emigranA] = llegan[f.emigranA] || { n: 0, ad: 0, co: {} };
+        d.n += emigran; d.ad += p.ad * q; for (const n in p.co) d.co[n] = (d.co[n] || 0) + p.co[n] * q;
+      }
+      if (t1 > 0) escala(p, fin / t1); else { p.ad = fin; p.co = {}; }
+      const ninos = Math.round(tot(p) - mayores(p, y, eM)), adultos = fin - ninos, ind = f.indEjercito || 0;
+      res[key] = { ini, crec, recibe, emigran, emigranA: aqui.has(f.emigranA) ? f.emigranA : null, fin, adultos, ninos, edad: eM, edadHijos: eH,
+        ejercito: adultos * ind, diario: fin * (f.lbDiarias || 0),
+        cohortes: Object.fromEntries(Object.entries(p.co).filter(([n, v]) => y - n < eM && v > 0.5)),
+        incorporan: Object.entries(p.co).filter(([n]) => y - n < eM && y + 1 - n >= eM).reduce((s, [, v]) => s + v, 0) * ind };
     }
   }
   return censoCache = out;
 }
 const anioDe = d => d && d.anio != null ? d.anio : years('poblacion').find(y => S.poblacion[y] === d);
-const enCenso = (d, key) => (censo()[anioDe(d)] || {})[key] || { adultos: 0, ninos: 0, ejercito: 0, incorporan: 0, cohortes: {} };
+const VACIO = { ini: 0, crec: 0, recibe: 0, emigran: 0, fin: 0, adultos: 0, ninos: 0, ejercito: 0, diario: 0, incorporan: 0, cohortes: {} };
+const calcPob = (d, key) => (censo()[anioDe(d)] || {})[key] || VACIO;
 function totPob(d, excluir) {
   const t = { fin: 0, ejercito: 0, ninos: 0, diario: 0, inicio: 0 };
-  for (const [key, f] of filas(d)) { if (excluir && excluir.includes(f.region)) continue; const c = calcPob(f), e = enCenso(d, key);
-    t.fin += c.fin; t.ejercito += e.ejercito; t.ninos += e.ninos; t.diario += c.diario; t.inicio += f.poblacion || 0; }
+  for (const [key, f] of filas(d)) { if (excluir && excluir.includes(f.region)) continue; const c = calcPob(d, key);
+    t.fin += c.fin; t.ejercito += c.ejercito; t.ninos += c.ninos; t.diario += c.diario; t.inicio += f.poblacion || 0; }
   t.anual = t.diario * 365; return t;
 }
 const reglasJungla = () => ({ ...JUNGLA_DEF, ...(S.jungla || {}), casillas: { ...((S.jungla || {}).casillas || {}) } });
@@ -476,7 +491,7 @@ function calcJungla(pd) {
   const R = reglasJungla(); const out = [];
   for (const [key, f] of filas(pd)) {
     if (!R.regiones.includes(f.region)) continue;
-    const c = calcPob(f), anual = c.diario * 365;
+    const c = calcPob(pd, key), anual = c.diario * 365;
     const mult = (R.abundancia || 0) * (1 + (f.raza === 'Goblin' ? (R.bonoGoblins || 0) / 100 : 0));
     const lbCasilla = (R.millasPorCasilla || 0) * CAZA_LB_MILLA * mult, piezasCasilla = (R.millasPorCasilla || 0) * CAZA_PIEZAS_MILLA * mult;
     const asignadas = R.casillas[key];
@@ -660,7 +675,7 @@ VIEWS.resumen = () => {
   const tTi = td ? totTierras(td) : { caza: 0, pesca: 0, cultivos: 0, total: 0 }, tGa = gd ? totGanado(gd) : { comida: 0, consumo: 0 };
   const prod = tTi.total + tGa.comida;
   const RJ = reglasJungla(); const tpB = pd ? totPob(pd, RJ.regiones) : null; const jun = pd ? calcJungla(pd) : [];
-  const regiones = {}; if (pd) for (const [, f] of filas(pd)) { const c = calcPob(f); const r = regiones[f.region] = regiones[f.region] || { fin: 0, max: 0 }; r.fin += c.fin; r.max += f.maximo || 0; }
+  const regiones = {}; if (pd) for (const [key, f] of filas(pd)) { const c = calcPob(pd, key); const r = regiones[f.region] = regiones[f.region] || { fin: 0, max: 0 }; r.fin += c.fin; r.max += f.maximo || 0; }
   const regRows = Object.entries(regiones).sort((a, b) => b[1].fin - a[1].fin);
   const maxReg = Math.max(1, ...regRows.map(([, r]) => r.max || r.fin));
   const hist = years('poblacion').filter(y => !esPlan(y)).map(y => ({ x: y, v: totPob(S.poblacion[y]).fin, tip: fmt(totPob(S.poblacion[y]).fin, 0) + ' ciudadanos', short: fmt(totPob(S.poblacion[y]).fin, 0) }));
@@ -728,16 +743,19 @@ VIEWS.poblacion = () => {
   if (!d) return emptyView('Población', 'Aún no hay censo. Cuando se carguen los datos del Excel aparecerán aquí.');
   const t = totPob(d);
   const k = (key, f, v, w) => edit ? numIn('pob', key, f, v, w) : fmt(v);
-  const rows = filas(d).map(([key, f]) => { const c = calcPob(f), e = enCenso(d, key); const full = f.maximo > 0 && c.fin >= f.maximo;
+  const nombreFila = kk => { const g = d.filas[kk]; return g ? g.region : kk; };
+  const destinos = key => `<select class="inl" id="i-pobdest-${esc(key)}" data-bind="pobdest" data-a="${esc(key)}" aria-label="Adónde van los que no caben" ${dis()}><option value="">Fuera del dominio</option>` +
+    filas(d).filter(([kk]) => kk !== key).map(([kk, g]) => `<option value="${esc(kk)}" ${d.filas[key].emigranA === kk ? 'selected' : ''}>${esc(g.region)} · ${esc(g.subraza || g.raza)}</option>`).join('') + '</select>';
+  const rows = filas(d).map(([key, f]) => { const c = calcPob(d, key), e = c; const full = f.maximo > 0 && c.fin >= f.maximo;
     return `<tr><td class="name">${esc(f.region)}<small>${esc(f.raza)} · ${esc(f.subraza)}</small></td>
-      <td class="r">${k(key, 'poblacion', f.poblacion)}</td><td class="r">${k(key, 'bajas', f.bajas)}</td><td class="r">${k(key, 'bajasCiviles', f.bajasCiviles || 0)}</td><td class="r">${k(key, 'desplazamientos', f.desplazamientos)}</td>
+      <td class="r">${k(key, 'poblacion', f.poblacion)}</td><td class="r">${k(key, 'bajas', f.bajas)}</td><td class="r">${k(key, 'bajasCiviles', f.bajasCiviles || 0)}</td><td class="r">${k(key, 'desplazamientos', f.desplazamientos)}${c.recibe > 0 ? `<small class="muted" style="display:block">+${fmt(c.recibe, 0)} sin sitio en otra región</small>` : ''}</td>
       <td class="r">${k(key, 'indCrec', f.indCrec)}</td><td class="r sub">${(c.crec >= 0 ? '+' : '') + fmt(c.crec, 1)}</td>
-      <td class="r">${k(key, 'maximo', f.maximo)}</td><td class="calc">${fmt(c.fin, 0)}${full ? ' <span class="flag">tope</span>' : ''}${c.emigran > 0 ? `<small>${fmt(c.emigran, 0)} emigran</small>` : ''}</td>
+      <td class="r">${k(key, 'maximo', f.maximo)}</td><td>${edit ? destinos(key) : esc(c.emigranA ? nombreFila(c.emigranA) : 'Fuera')}</td><td class="calc">${fmt(c.fin, 0)}${full ? ' <span class="flag">tope</span>' : ''}${c.emigran > 0 ? `<small>${fmt(c.emigran, 0)} no caben → ${esc(c.emigranA ? nombreFila(c.emigranA) : 'fuera')}</small>` : ''}</td>
       <td class="r">${k(key, 'indEjercito', f.indEjercito)}</td><td class="calc">${fmt(e.ejercito, 0)}</td>
       <td class="r">${k(key, 'lbDiarias', f.lbDiarias)}</td><td class="calc">${fmt(c.diario, 0)}</td>
       <td>${edit ? delBtn('delrow', 'poblacion|' + key, 'Quitar') : ''}</td></tr>`; }).join('');
   return `<div class="sheet">
-    <div class="head"><div><h2>Población y ejército</h2><p>Ciudadanos al cierre = población inicial + crecimiento + desplazamientos − bajas de soldados − bajas civiles, redondeado hacia abajo. Quien no cabe en el máximo de la región emigra con su familia. El ejército solo cuenta a los adultos (detalle en la pestaña Ejército).</p></div>${yearChips('poblacion')}</div>
+    <div class="head"><div><h2>Población y ejército</h2><p>Ciudadanos al cierre = población inicial + crecimiento + desplazamientos − bajas de soldados − bajas civiles, redondeado hacia abajo. Solo tienen hijos los adultos: crecimiento = adultos × índice, y los nacidos en la campaña cuentan a partir de los ${EDAD_HIJOS} años. Quien no cabe en el máximo se va con su familia a la región elegida. El ejército solo cuenta a los adultos (detalle en la pestaña Ejército).</p></div>${yearChips('poblacion')}</div>
     ${yearBanner('poblacion')}
     <div class="stats">
       <div class="stat"><div class="k">Ciudadanos al cierre</div><div class="v">${fmt(t.fin, 0)}</div><div class="s">empezó el año con ${fmt(t.inicio, 0)}</div></div>
@@ -746,9 +764,9 @@ VIEWS.poblacion = () => {
       <div class="stat"><div class="k">Consumo anual</div><div class="v">${big(t.anual)} lb</div></div>
     </div>
     <div class="tbl"><table>
-      <thead><tr><th>Región · pueblo</th><th class="r">Población inicial</th><th class="r" title="Mueren adultos: soldados en combate">Bajas soldados</th><th class="r" title="Mueren adultos y niños por igual: asaltos, plagas…">Bajas civiles</th><th class="r">Desplaz.</th><th class="r">Índice crec.</th><th class="r">Crec.</th><th class="r">Máximo</th><th class="r">Ciudadanos</th><th class="r">Índice ejército</th><th class="r">Ejército</th><th class="r">lb/día pers.</th><th class="r">lb/día</th><th></th></tr></thead>
+      <thead><tr><th>Región · pueblo</th><th class="r">Población inicial</th><th class="r" title="Mueren adultos: soldados en combate">Bajas soldados</th><th class="r" title="Mueren adultos y niños por igual: asaltos, plagas…">Bajas civiles</th><th class="r">Desplaz.</th><th class="r">Índice crec.</th><th class="r" title="Adultos en edad de tener hijos × índice de crecimiento">Crec.</th><th class="r">Máximo</th><th title="Adónde van, con sus familias, los que no caben en el máximo">Si no caben, van a</th><th class="r">Ciudadanos</th><th class="r">Índice ejército</th><th class="r">Ejército</th><th class="r">lb/día pers.</th><th class="r">lb/día</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
-      <tfoot><tr><td>Total</td><td class="r">${fmt(t.inicio, 0)}</td><td colspan="6"></td><td class="r">${fmt(t.fin, 0)}</td><td></td><td class="r">${fmt(t.ejercito, 0)}</td><td></td><td class="r">${fmt(t.diario, 0)}</td><td></td></tr></tfoot>
+      <tfoot><tr><td>Total</td><td class="r">${fmt(t.inicio, 0)}</td><td colspan="7"></td><td class="r">${fmt(t.fin, 0)}</td><td></td><td class="r">${fmt(t.ejercito, 0)}</td><td></td><td class="r">${fmt(t.diario, 0)}</td><td></td></tr></tfoot>
     </table></div>
     ${edit ? `<details class="adder" id="add-pob"><summary>Añadir un pueblo o región</summary>
       <form class="add" data-form="pob">
@@ -1128,6 +1146,11 @@ function yearBinder(c, nombre, rowName) {
   };
 }
 const BIND = {
+  pobdest(el) {
+    if (!guard()) return; const y = actual(), key = el.dataset.a, row = S.poblacion[y]?.filas?.[key]; if (!row) return;
+    const v = el.value || null; if ((row.emigranA || null) === v) return; const dest = v ? S.poblacion[y].filas[v] : null;
+    upd(`poblacion/y${y}`, { filas: { [key]: { emigranA: v } } }).then(() => log(`cambió adónde van los que no caben en ${row.region} (año ${y}): ${dest ? dest.region : 'fuera del dominio'}`)).catch(() => {});
+  },
   pob: yearBinder('poblacion', 'población', r => `${r.region} · ${r.subraza || r.raza}`),
   gan: yearBinder('ganado', 'ganado', r => r.especie),
   tie: yearBinder('tierras', 'tierras', r => r.region),
@@ -1368,7 +1391,7 @@ function siguiente(c, d, ny) {
   }
   const f = {};
   for (const [k, r] of filas(d)) {
-    if (c === 'poblacion') f[k] = { ...r, poblacion: calcPob(r).fin, bajas: 0, bajasCiviles: 0, desplazamientos: 0 };
+    if (c === 'poblacion') f[k] = { ...r, poblacion: calcPob(d, k).fin, bajas: 0, bajasCiviles: 0, desplazamientos: 0 };
     else if (c === 'ganado') f[k] = { ...r, poblacion: r.animales || 0, anadidas: 0, sacrificadas: 0 };
     else f[k] = { ...r };
   }
