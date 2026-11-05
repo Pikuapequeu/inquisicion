@@ -398,7 +398,7 @@ function hace(ts) {
 /* ---------- state ---------- */
 const S = { poblacion: {}, ganado: {}, tierras: {}, mina: {}, monedas: [], gemas: [], objetos: [], cronica: [], objetivos: [], registro: [], ready: {},
   mapas: [], dominio: {}, leyenda: null, jerarquia: null };
-const V = { tab: 'resumen', year: {}, filtro: store.get('filtro', []), editEv: null, jsel: null };
+const V = { tab: 'resumen', subPob: store.get('subPob', 'censo'), year: {}, filtro: store.get('filtro', []), editEv: null, jsel: null };
 let db = null, user = null, room = null, myId = null, canWrite = true, connected = false;
 let auth = null, me = null, authReady = false, esDueno = false, miembro = null, acceso = null;
 const CFG = window.FIREBASE_CONFIG || null;
@@ -471,13 +471,14 @@ function censo() {
       res[key] = { ini, crec, recibe, emigran, emigranA: aqui.has(f.emigranA) ? f.emigranA : null, fin, adultos, ninos, edad: eM, edadHijos: eH,
         ejercito: adultos * ind, diario: fin * (f.lbDiarias || 0),
         cohortes: Object.fromEntries(Object.entries(p.co).filter(([n, v]) => y - n < eM && v > 0.5)),
+        porEdad: Object.fromEntries(Object.entries(p.co).map(([n, v]) => [y - n, v])),
         incorporan: Object.entries(p.co).filter(([n]) => y - n < eM && y + 1 - n >= eM).reduce((s, [, v]) => s + v, 0) * ind };
     }
   }
   return censoCache = out;
 }
 const anioDe = d => d && d.anio != null ? d.anio : years('poblacion').find(y => S.poblacion[y] === d);
-const VACIO = { ini: 0, crec: 0, recibe: 0, emigran: 0, fin: 0, adultos: 0, ninos: 0, ejercito: 0, diario: 0, incorporan: 0, cohortes: {} };
+const VACIO = { ini: 0, crec: 0, recibe: 0, emigran: 0, fin: 0, adultos: 0, ninos: 0, ejercito: 0, diario: 0, incorporan: 0, cohortes: {}, porEdad: {} };
 const calcPob = (d, key) => (censo()[anioDe(d)] || {})[key] || VACIO;
 function totPob(d, excluir) {
   const t = { fin: 0, ejercito: 0, ninos: 0, diario: 0, inicio: 0 };
@@ -738,7 +739,77 @@ function feedHtml() {
   }).join('') + '</ul>';
 }
 
+const pobSubtabs = () => `<div class="subtabs" role="tablist" aria-label="Población" style="margin-bottom:18px">` +
+  [['censo', 'Censo', 'ciudadanos y comida'], ['ninos', 'Niños', 'nacimientos y mayoría de edad']].map(([id, n, s]) =>
+    `<button class="subtab" role="tab" data-act="subpob" data-id="${id}" aria-selected="${(V.subPob === 'ninos' ? 'ninos' : 'censo') === id}">${n}<small>${s}</small></button>`).join('') + '</div>';
+
+// Register of the children born during the campaign: who is born each year, who comes of age.
+VIEWS.ninos = () => {
+  const y = selYear('poblacion'); const d = S.poblacion[y];
+  const C = censo(), Cy = C[y] || {}, fs = filas(d);
+  const suma = (c, e) => c.porEdad[e] || 0;
+  // one line per year: born, become adults (military age), can start a family, children at the close
+  const registro = years('poblacion').filter(yy => yy >= 1).map(yy => {
+    const r = { y: yy, nacen: 0, adultos: 0, hijos: 0, ninos: 0 };
+    for (const [key] of filas(S.poblacion[yy])) { const c = (C[yy] || {})[key]; if (!c) continue;
+      r.nacen += Math.max(0, c.crec); r.adultos += suma(c, c.edad); r.hijos += suma(c, c.edadHijos); r.ninos += c.ninos; }
+    return r;
+  });
+  const T = { nacen: 0, adultos: 0, hijos: 0, ninos: 0, proximo: 0 };
+  const rows = fs.map(([key, f]) => { const c = Cy[key]; if (!c) return '';
+    const n = Math.max(0, c.crec), a = suma(c, c.edad), h = suma(c, c.edadHijos), p = suma(c, c.edad - 1);
+    T.nacen += n; T.adultos += a; T.hijos += h; T.ninos += c.ninos; T.proximo += p;
+    return `<tr><td class="name">${esc(f.region)}<small>${esc(f.raza)} · ${esc(f.subraza)}</small></td>
+      <td class="r">${fmt(c.fin, 0)}</td><td class="r">${fmt(n, 0)}</td><td class="calc">${fmt(c.ninos, 0)}</td>
+      <td class="r">${a >= 0.5 ? fmt(a, 0) : '—'}<small class="muted" style="display:block">a los ${c.edad}</small></td>
+      <td class="r">${h >= 0.5 ? fmt(h, 0) : '—'}<small class="muted" style="display:block">a los ${c.edadHijos}</small></td>
+      <td class="r">${p >= 0.5 ? fmt(p, 0) : '—'}</td></tr>`; }).join('');
+  // children by age this year, one column per town that has any
+  const conNinos = fs.filter(([key]) => Cy[key] && Object.values(Cy[key].porEdad).some(v => v >= 0.5));
+  const edades = [...new Set(conNinos.flatMap(([key]) => Object.keys(Cy[key].porEdad).map(Number)))]
+    .filter(e => conNinos.reduce((s, [key]) => s + (Cy[key].porEdad[e] || 0), 0) >= 0.5).sort((a, b) => a - b);
+  const edadMinima = Math.min(EDAD_MILITAR, ...conNinos.map(([key]) => Cy[key].edad));
+  const piramide = edades.map(e => { let tot = 0;
+    const celdas = conNinos.map(([key]) => { const v = Cy[key].porEdad[e] || 0; tot += v;
+      return `<td class="r ${e >= Cy[key].edad ? '' : 'sub'}">${v >= 0.5 ? fmt(v, 0) : '—'}</td>`; }).join('');
+    const estado = e >= edadMinima ? 'adultos' : `adultos el año ${y + edadMinima - e}`;
+    return `<tr><td class="name">${e} ${e === 1 ? 'año' : 'años'}<small>nacidos el año ${y - e} · ${estado}</small></td>${celdas}<td class="calc">${fmt(tot, 0)}</td></tr>`; }).join('');
+  return `<div class="sheet">
+    <div class="head"><div><h2>Población y ejército</h2><p>Registro de los nacidos durante la campaña. Cada año nacen hijos de los adultos; a los ${EDAD_MILITAR} años entran en el ejército y a los ${EDAD_HIJOS} pueden tener hijos (la edad del ejército se cambia por pueblo en la pestaña Ejército). Cuando una familia se muda o muere gente, salen adultos y niños en la misma proporción.</p></div>${yearChips('poblacion')}</div>
+    ${pobSubtabs()}
+    ${yearBanner('poblacion')}
+    <div class="stats">
+      <div class="stat"><div class="k">Nacen el año ${y}</div><div class="v">${fmt(T.nacen, 0)}</div></div>
+      <div class="stat"><div class="k">Niños al cierre</div><div class="v">${fmt(T.ninos, 0)}</div><div class="s">menores de la edad del ejército</div></div>
+      <div class="stat"><div class="k">Se hacen adultos</div><div class="v">${fmt(T.adultos, 0)}</div><div class="s">cumplen la edad del ejército este año</div></div>
+      <div class="stat"><div class="k">Se hacen adultos el año ${y + 1}</div><div class="v">${fmt(T.proximo, 0)}</div></div>
+    </div>
+    <div class="tbl"><table>
+      <thead><tr><th>Región · pueblo</th><th class="r">Ciudadanos</th><th class="r">Nacen</th><th class="r">Niños</th><th class="r">Se hacen adultos</th><th class="r">Pueden tener hijos</th><th class="r">Adultos el año ${y + 1}</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><td>Total</td><td></td><td class="r">${fmt(T.nacen, 0)}</td><td class="r">${fmt(T.ninos, 0)}</td><td class="r">${fmt(T.adultos, 0)}</td><td class="r">${fmt(T.hijos, 0)}</td><td class="r">${fmt(T.proximo, 0)}</td></tr></tfoot>
+    </table></div>
+    <div class="cols">
+      <section class="panel"><h3>Registro año por año</h3>
+        <div class="tbl" style="border:0"><table>
+          <thead><tr><th>Año</th><th class="r">Nacen</th><th class="r">Se hacen adultos</th><th class="r">Pueden tener hijos</th><th class="r">Niños al cierre</th></tr></thead>
+          <tbody>${registro.map(r => `<tr ${r.y === y ? 'style="font-weight:700"' : ''}><td class="name">Año ${r.y}${esPlan(r.y) ? '<small>planificado</small>' : ''}</td>
+            <td class="r">${fmt(r.nacen, 0)}</td><td class="r">${r.adultos >= 0.5 ? fmt(r.adultos, 0) : '—'}</td><td class="r">${r.hijos >= 0.5 ? fmt(r.hijos, 0) : '—'}</td><td class="r">${fmt(r.ninos, 0)}</td></tr>`).join('')}</tbody>
+        </table></div>
+      </section>
+      <section class="panel"><h3>Niños por edad · año ${y}</h3>
+        ${edades.length ? `<div class="tbl" style="border:0"><table>
+          <thead><tr><th>Edad</th>${conNinos.map(([, f]) => `<th class="r" title="${esc(f.raza)} · ${esc(f.subraza)}">${esc(f.region)}</th>`).join('')}<th class="r">Total</th></tr></thead>
+          <tbody>${piramide}</tbody>
+        </table></div>
+        <p class="ui muted" style="font-size:13px;margin:8px 0 0">«0 años» son los nacidos este año, más los bebés que llegan con familias de otras regiones. Las cifras tienen decimales por dentro y aquí se ven redondeadas, así que la suma de una columna puede diferir en una unidad.</p>` : '<p class="empty">Aún no ha nacido nadie en la campaña.</p>'}
+      </section>
+    </div>
+  </div>`;
+};
+
 VIEWS.poblacion = () => {
+  if (V.subPob === 'ninos') return VIEWS.ninos();
   const y = selYear('poblacion'); const d = S.poblacion[y]; const edit = y === actual();
   if (!d) return emptyView('Población', 'Aún no hay censo. Cuando se carguen los datos del Excel aparecerán aquí.');
   const t = totPob(d);
@@ -756,6 +827,7 @@ VIEWS.poblacion = () => {
       <td>${edit ? delBtn('delrow', 'poblacion|' + key, 'Quitar') : ''}</td></tr>`; }).join('');
   return `<div class="sheet">
     <div class="head"><div><h2>Población y ejército</h2><p>Ciudadanos al cierre = población inicial + crecimiento + desplazamientos − bajas de soldados − bajas civiles, redondeado hacia abajo. Solo tienen hijos los adultos: crecimiento = adultos × índice, y los nacidos en la campaña cuentan a partir de los ${EDAD_HIJOS} años. Quien no cabe en el máximo se va con su familia a la región elegida. El ejército solo cuenta a los adultos (detalle en la pestaña Ejército).</p></div>${yearChips('poblacion')}</div>
+    ${pobSubtabs()}
     ${yearBanner('poblacion')}
     <div class="stats">
       <div class="stat"><div class="k">Ciudadanos al cierre</div><div class="v">${fmt(t.fin, 0)}</div><div class="s">empezó el año con ${fmt(t.inicio, 0)}</div></div>
@@ -1353,6 +1425,7 @@ const ACTS = {
       delete M.img[m.id]; M.sel = null; log(`borró el mapa «${m.nombre}»`); toast('Mapa borrado.');
     } catch (e) { toast(errMsg(e)); } }); },
   year(b) { V.year[b.dataset.c] = +b.dataset.y; schedule(); },
+  subpob(b) { V.subPob = b.dataset.id; store.set('subPob', V.subPob); schedule(); },
   filtro(b) { const q = b.dataset.q; if (!q) V.filtro = []; else V.filtro = V.filtro.includes(q) ? V.filtro.filter(x => x !== q) : [...V.filtro, q]; store.set('filtro', V.filtro); schedule(); },
   editev(b) { V.editEv = b.dataset.id; schedule(); requestAnimationFrame(() => { const f = $('#form-ev'); if (f) { f.scrollIntoView({ block: 'center', behavior: 'smooth' }); $('#ev-anio')?.focus({ preventScroll: true }); } }); },
   cancelev() { V.editEv = null; schedule(); },
